@@ -4,9 +4,9 @@ Sagarmatha Light Solution ERP (NepaTronix) — Next.js frontend and Express + Mo
 
 ## Stack
 
-- Frontend: Next.js 14 (`frontend/`, port 3000)
-- Backend: Express (`backend/`, port 5000)
-- Database: MongoDB
+- Frontend: Next.js 14 (`frontend/`, port **3016**)
+- Backend: Express (`backend/`, port **5000**)
+- Database: MongoDB (port **27017**)
 
 ## Local development
 

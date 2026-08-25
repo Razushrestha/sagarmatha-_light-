@@ -12,7 +12,8 @@ const nextConfig = {
     return config;
   },
   async rewrites() {
-    const backend = process.env.BACKEND_URL || "http://localhost:5000";
+    const backendPort = process.env.BACKEND_PORT || 5000;
+    const backend = process.env.BACKEND_URL || `http://127.0.0.1:${backendPort}`;
     return [
       { source: "/api/:path*", destination: `${backend}/api/:path*` },
       { source: "/uploads/:path*", destination: `${backend}/uploads/:path*` },

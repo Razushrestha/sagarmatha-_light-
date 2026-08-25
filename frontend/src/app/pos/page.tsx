@@ -100,7 +100,6 @@ function safeCredit(value?: number) {
   return Number.isFinite(value) ? value! : 0;
 }
 
-const PAYMENT_METHODS = ["cash", "esewa", "khalti", "fonepay", "bank", "credit"];
 const PRICE_LEVELS = [
   { id: "retail", label: "Retail" },
   { id: "wholesale", label: "Wholesale" },

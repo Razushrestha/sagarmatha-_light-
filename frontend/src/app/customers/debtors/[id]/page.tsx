@@ -368,7 +368,6 @@ export default function DebtorManagePage() {
 
   const debtAmount = customer.debtAmount ?? customer.outstanding ?? 0;
   const creditAmount = customer.creditAmount ?? customer.creditBalance ?? 0;
-  const paymentTotal = payments.reduce((sum, p) => sum + (p.type === "refund" ? -p.amount : p.amount), 0);
 
   return (
     <DashboardLayout>

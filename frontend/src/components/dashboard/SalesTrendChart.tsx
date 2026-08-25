@@ -6,7 +6,6 @@ import {
 import { formatCurrency } from "@/lib/utils";
 
 const CHART_STROKE = "#111827";
-const CHART_FILL = "#e5e7eb";
 
 function formatAxis(value: number) {
   const amount = Number(value) || 0;

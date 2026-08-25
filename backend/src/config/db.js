@@ -1,14 +1,17 @@
 const mongoose = require('mongoose');
 const { ensureDefaultWarehouse } = require('../utils/warehouse');
 const { reconcileAllDebtors } = require('../utils/salePayments');
+const { mongoUri } = require('./env');
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
+    const uri = mongoUri();
+    const conn = await mongoose.connect(uri, {
       maxPoolSize: Number(process.env.MONGO_POOL_SIZE || 20),
       serverSelectionTimeoutMS: 8000,
     });
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    const port = conn.connection.port || Number(process.env.MONGODB_PORT || 27017);
+    console.log(`MongoDB connected on port ${port} (${conn.connection.host}/${conn.connection.name})`);
     await ensureDefaultWarehouse();
 
     const runStartupSync = process.env.ENABLE_STARTUP_SYNC === 'true'

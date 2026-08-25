@@ -30,7 +30,7 @@ export default function LoginPage() {
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } }; code?: string; message?: string };
       if (!error.response) {
-        toast.error("Cannot reach server. Make sure the backend is running on port 5000.");
+        toast.error("Cannot reach the API. Make sure the website and backend are running on their own ports.");
       } else {
         toast.error(error.response?.data?.message || "Login failed");
       }

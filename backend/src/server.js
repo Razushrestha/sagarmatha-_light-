@@ -10,7 +10,7 @@ const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const connectDB = require('./config/db');
 const { mountApi } = require('./routes');
-const { assertProductionEnv, corsOrigins } = require('./config/env');
+const { assertProductionEnv, corsOrigins, backendPort } = require('./config/env');
 
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -94,12 +94,13 @@ app.use((err, req, res, next) => {
   });
 });
 
-const PORT = Number(process.env.PORT) || 5000;
+const PORT = backendPort();
+const HOST = process.env.HOST || '0.0.0.0';
 
 async function start() {
   await connectDB();
-  const server = app.listen(PORT, () => {
-    console.log(`Sagarmatha Light Solution ERP API listening on port ${PORT} (${isProd ? 'production' : 'development'})`);
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`API listening on ${HOST}:${PORT} (${isProd ? 'production' : 'development'})`);
   });
 
   const shutdown = async (signal) => {

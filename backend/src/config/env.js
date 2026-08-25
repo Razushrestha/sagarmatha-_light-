@@ -24,16 +24,29 @@ function assertProductionEnv() {
   }
 }
 
+function frontendPort() {
+  return Number(process.env.FRONTEND_PORT || 3016);
+}
+
+function backendPort() {
+  return Number(process.env.PORT || process.env.BACKEND_PORT || 5000);
+}
+
+function mongoPort() {
+  return Number(process.env.MONGODB_PORT || 27017);
+}
+
 function corsOrigins() {
   const extra = String(process.env.CORS_ORIGINS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  const webPort = frontendPort();
   return new Set([
     process.env.FRONTEND_URL,
     ...extra,
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
+    `http://localhost:${webPort}`,
+    `http://127.0.0.1:${webPort}`,
   ].filter(Boolean));
 }
 
@@ -49,4 +62,19 @@ function cookieOptions() {
   };
 }
 
-module.exports = { assertProductionEnv, corsOrigins, cookieOptions };
+function mongoUri() {
+  if (process.env.MONGODB_URI) return process.env.MONGODB_URI;
+  const host = process.env.MONGODB_HOST || '127.0.0.1';
+  const db = process.env.MONGODB_DB || 'sagarmatha_light_solution';
+  return `mongodb://${host}:${mongoPort()}/${db}`;
+}
+
+module.exports = {
+  assertProductionEnv,
+  corsOrigins,
+  cookieOptions,
+  frontendPort,
+  backendPort,
+  mongoPort,
+  mongoUri,
+};

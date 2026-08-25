@@ -81,8 +81,8 @@ interface PurchaseVoucherFormProps {
   onCancel: () => void;
 }
 
-function safeNum(value: number, fallback = 0): number {
-  return Number.isFinite(value) ? value : fallback;
+function safeNum(value: number | undefined | null, fallback = 0): number {
+  return Number.isFinite(value) ? Number(value) : fallback;
 }
 
 function getProductUnit(product: ProductOption): string {
@@ -233,7 +233,7 @@ export default function PurchaseVoucherForm({
 
     onSubmit({
       supplier: supplierId,
-      ...(warehouseId ? { warehouse: warehouseId } : {}),
+      warehouse: warehouseId,
       voucherDate,
       dueDate,
       supplierInvoiceNo: isOrder ? "" : supplierInvoiceNo,

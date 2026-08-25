@@ -49,8 +49,8 @@ interface SupplierPaymentFormProps {
   loadUnpaidPurchases: (supplierId: string) => Promise<UnpaidPurchase[]>;
 }
 
-function safeNum(value: number, fallback = 0): number {
-  return Number.isFinite(value) ? value : fallback;
+function safeNum(value: number | undefined | null, fallback = 0): number {
+  return Number.isFinite(value) ? Number(value) : fallback;
 }
 
 function todayISO() {
