@@ -1,0 +1,830 @@
+ELECTRICAL & HARDWARE SHOP
+ERP SYSTEM
+Complete Build Plan — Part by Part
+Prepared by
+NepaTronix Engineering Solutions
+Client
+Electrical & Hardware Shop
+Date
+August 2026
+Version
+v1.0 — Master Plan
+Nepal IRD VAT Compliant  •  eSewa / Khalti / Fonepay  •  Offline POS  •  Multi-Branch
+▌ System Overview
+What you are building and how it all connects
+This ERP is a fully integrated business management system for an Electrical & Hardware Shop. It covers every operation from the moment a customer walks in, to VAT billing, stock movement, supplier payments, accounting, and analytics — all in one platform.
+🎯  Goal
+Replace manual billing, spreadsheets, and disconnected tools with a single professional ERP that is Nepal IRD VAT compliant, supports local payment gateways (eSewa, Khalti, Fonepay), works offline at POS, and scales from one shop to multiple branches.
+▌ All Phases at a Glance
+Build order — from foundation to advanced features
+Phase
+Part
+Focus
+Duration
+Priority
+1
+Foundation
+Architecture, Database ERD, Tech Stack, Project Setup
+1 Week
+Critical
+2
+Auth & RBAC
+Login, Roles, Permissions, User Management
+1 Week
+Critical
+3
+Product & Inventory
+Products, Categories, Brands, Units, Stock
+2 Weeks
+Critical
+4
+POS & Sales
+Cart, Checkout, Payment, Invoice, VAT Bill
+2 Weeks
+Critical
+5
+Purchase
+Supplier, PO, GRN, Purchase Invoice, Returns
+1.5 Weeks
+Critical
+6
+Customers & Debtors
+CRM, Credit Sales, Payments, Ledger, Reminders
+1 Week
+Critical
+7
+Accounting
+Chart of Accounts, Ledger, P&L, Balance Sheet
+2 Weeks
+Critical
+8
+Quotation & Estimates
+Quotation, Estimate, Convert to Sale
+1 Week
+High
+9
+Returns & Exchanges
+Sales Return, Purchase Return, Credit Notes
+1 Week
+High
+10
+Reports & Analytics
+All Reports, Executive Dashboard, Export
+1.5 Weeks
+High
+11
+Warehouse & Stock
+Multi-warehouse, Transfer, Adjustment, Damage
+1 Week
+High
+12
+Expenses
+Expense Categories, Approval, Attachments
+0.5 Week
+High
+13
+Warranty & Serial
+Serial Tracking, Warranty Claims, Service
+1 Week
+Medium
+14
+HR & Tasks
+Employees, Attendance, Task Management
+1 Week
+Medium
+15
+Notifications & Audit
+Alerts, Audit Logs, Global Search
+0.5 Week
+Medium
+16
+Settings & Security
+Config, Backup, 2FA, Permissions, Print Templates
+1 Week
+High
+17
+Project-Based Sales
+Project CRM, Material Tracking, Profit per Project
+1 Week
+Medium
+18
+Mobile & API Polish
+Responsive UI, API readiness for future mobile app
+1 Week
+Medium
+▌ PHASE 1 — Foundation & Architecture
+Build this first. Everything depends on it.
+Do NOT skip this phase. If the database and transaction architecture are wrong, you will rebuild everything later. Spend a full week here.
+▌ 1.1  Technology Stack
+Layer
+Technology
+Why
+Frontend
+Next.js 14 + React + TailwindCSS
+Fast, SEO, SSR, mobile-ready
+Backend / API
+Django + Django REST Framework
+Robust ORM, auth, Nepal-friendly
+Database
+PostgreSQL
+Relational, transactions, ACID
+Cache / Queue
+Redis + Celery
+Background jobs, reminders, exports
+Auth
+JWT + httpOnly cookies
+Secure, stateless
+Print/PDF
+Puppeteer / WeasyPrint
+VAT Invoice, Quotation PDFs
+Barcode
+ZXing / QuaggaJS
+USB + camera scanner support
+SMS
+Sparrow SMS API
+Nepal — payment reminders
+Payment
+eSewa, Khalti, Fonepay SDKs
+Nepal payment gateways
+Offline POS
+IndexedDB + Service Worker
+Works without internet
+Hosting
+VPS / cPanel / Docker
+Nepal server or cloud
+▌ 1.2  Core Database Tables
+Design all tables before writing any code
+These are the minimum tables. Design the full ERD in draw.io or dbdiagram.io first.
+Table Group
+Tables
+Auth & Users
+users, roles, permissions, role_permissions, user_sessions, audit_logs
+Products
+products, product_variants, product_images, categories, brands, units, unit_conversions
+Inventory
+warehouses, stock, stock_movements, stock_adjustments, damaged_stock
+Sales
+sales, sale_items, sale_payments, sale_returns, sale_return_items
+Purchase
+purchases, purchase_items, purchase_payments, purchase_returns, purchase_return_items
+Quotation / Estimate
+quotations, quotation_items, estimates, estimate_items
+Customers
+customers, customer_transactions, customer_payments, customer_ledger
+Suppliers
+suppliers, supplier_transactions, supplier_payments, supplier_ledger
+Accounting
+chart_of_accounts, journal_entries, account_transactions, cash_transactions, bank_transactions
+Expenses
+expense_categories, expenses, expense_approvals
+Warranty & Serial
+serial_numbers, warranties, warranty_claims
+Employees
+employees, attendance, tasks, task_assignments
+Projects
+projects, project_materials, project_payments
+Notifications
+notifications, notification_rules
+Settings
+settings, company_profile, invoice_templates, tax_rules, payment_methods
+▌ 1.3  Transaction Architecture (Most Important)
+⚡  Core Rule
+Every financial event (Sale, Purchase, Return, Payment, Expense, Adjustment) must automatically trigger all downstream effects: stock change, ledger entry, VAT posting, profit update, and audit log — in a single atomic database transaction.
+Sale Transaction Flow:
+• 1. Create Sale record
+• 2. Create Sale Items
+• 3. Deduct Stock per item (stock_movements)
+• 4. Create Customer Receivable if credit sale
+• 5. Post to Sales Account (journal_entry)
+• 6. Post VAT to VAT Output Account
+• 7. Calculate COGS, update Gross Profit
+• 8. Record Payment(s) against sale
+• 9. Write Audit Log entry
+• 10. Trigger low-stock notification if below threshold
+Purchase Transaction Flow:
+• 1. Create Purchase record
+• 2. Create Purchase Items
+• 3. Add Stock per item (stock_movements)
+• 4. Create Supplier Payable
+• 5. Post to Purchase Account
+• 6. Post VAT to VAT Input Account
+• 7. Record Payment(s) against purchase
+• 8. Write Audit Log entry
+🔒  Backend Rule
+All permission checks MUST be enforced at the API level. Hiding a button on the frontend is NOT enough. The backend must reject any unauthorized API request regardless of the frontend state.
+▌ PHASE 2 — Authentication & Role-Based Access Control
+Who can do what — the security foundation
+▌ 2.1  Default Roles
+Role
+Access Scope
+Super Admin
+Full system. Manage shops, users, permissions, database, backup, all financial data, settings.
+Admin / Manager
+Sales, Purchases, Inventory, Customers, Suppliers, Reports, Employees, Expenses. No system settings.
+Sales Staff
+POS only: product search, cart, invoice, estimate generation, customer creation, own sales history.
+Receptionist
+Customer registration, enquiries, quotations, order management, customer follow-up.
+Accountant
+Payments, receivables, payables, expenses, account statements, P&L, cash/bank.
+Storekeeper
+Stock management, purchase receiving, stock adjustment, stock transfer, damaged products.
+Custom
+Any combination — system supports creating unlimited custom roles with granular permissions.
+▌ 2.2  Permission Model
+Granular control — not just role-based
+Do NOT hard-code permissions to roles. Build a 3-layer model:
+• Role → defines a set of Permissions
+• Permission → a specific action on a resource
+• User → assigned a Role (can override individual permissions)
+Permission Examples:
+Resource
+Action
+Sales Staff
+Manager
+Invoice
+Create
+✅ Yes
+✅ Yes
+Invoice
+Edit
+❌ No
+✅ Yes
+Invoice
+Delete
+❌ No
+✅ Yes (with approval)
+Discount
+Give ≤ 5%
+✅ Auto-approved
+✅ Yes
+Discount
+Give 6–15%
+❌ Needs approval
+✅ Yes
+Discount
+Give > 15%
+❌ No
+🔔 Admin approval
+Profit Margin
+View
+❌ No
+✅ Yes
+Stock
+Adjust
+❌ No
+✅ ≤10 units
+Reports
+Export
+❌ No
+✅ Yes
+▌ 2.3  After Login — Role-Directed Landing
+Each role goes directly to their workspace after login:
+• Sales Staff  →  POS / New Sale screen
+• Storekeeper  →  Inventory / Stock screen
+• Accountant  →  Accounting / Dashboard
+• Admin / Manager  →  Main Dashboard
+• Super Admin  →  Main Dashboard + System Settings
+▌ 2.4  Security Requirements
+• JWT tokens with httpOnly cookies (never localStorage)
+• Password hashing with bcrypt (minimum 12 rounds)
+• 2FA for Super Admin and Admin (TOTP / Google Authenticator)
+• Login history — IP, device, time
+• Automatic session logout after inactivity
+• Failed login lockout after 5 attempts
+• All permission checks enforced at API / backend level
+• API rate limiting to prevent brute force
+▌ PHASE 3 — Product & Inventory Management
+The heart of your stock system
+▌ 3.1  Product Fields
+Every product must store:
+Identity
+Pricing
+Stock & Location
+Product Name, SKU, Barcode, Brand, Category, Subcategory, Model, Description, Image(s)
+Purchase Price, Selling Price (Retail / Wholesale / Dealer / Project), Minimum Selling Price, VAT (inclusive/exclusive)
+Opening Stock, Current Stock, Min Stock (reorder point), Max Stock, Rack, Shelf, Warehouse, Supplier
+▌ 3.2  Unit of Measurement with Conversion
+Critical for hardware/electrical — wire is purchased per Roll but sold per Meter:
+• Purchase Unit: Roll
+◦ 1 Roll = 90 Meters (conversion factor stored)
+• Sales Unit: Meter
+◦ System automatically converts stock when selling
+• Supported units: Piece, Meter, Feet, Box, Packet, Roll, Kg, Gram, Liter, Set, Pair, Bundle, Coil
+▌ 3.3  Stock Ledger per Product
+Every product must have a full movement history:
+Event
+Description
+Stock Change
+Reference
+Opening Stock
+Initial stock when product added
++100
+System
+Purchase
+Stock received from supplier
++50
+PO-00125
+Sale
+Stock sold to customer
+−20
+INV-00453
+Sale Return
+Customer returned goods
++2
+RTN-00012
+Purchase Return
+Returned to supplier
+−5
+PRN-00008
+Adjustment +
+Manual count correction
++3
+ADJ-00005
+Adjustment −
+Shrinkage / count correction
+−3
+ADJ-00006
+Damage
+Products damaged/written off
+−5
+DMG-00002
+Transfer Out
+Moved to another warehouse
+−10
+TRF-00003
+Transfer In
+Received from another warehouse
++10
+TRF-00003
+▌ 3.4  Barcode System
+• Support USB barcode scanner (acts as keyboard input)
+• Support mobile camera barcode scanning (ZXing/QuaggaJS)
+• Generate barcode for products without one (Code-128 / EAN-13)
+• Print product labels: Name, SKU, Price, Barcode — A4 and thermal printer support
+• Batch label printing for multiple products
+▌ 3.5  Inventory Alerts
+• Low Stock Alert — when stock falls below minimum threshold
+• Out of Stock Alert — stock reaches zero
+• Overstock Warning — stock exceeds maximum threshold
+• Dead Stock Report — no movement in 90+ days
+• Fast-Moving Products — top sellers by quantity
+▌ PHASE 4 — POS & Sales
+The fastest module your staff will use every day
+▌ 4.1  POS Product Screen
+Design for speed. A cashier should complete a sale in under 30 seconds.
+• Product grid with image, name, SKU, stock count, price
+• Filter by: Name, SKU, Barcode, Brand, Category, Stock status
+• Barcode scan directly adds to cart
+• One-click Add to Cart with quantity selector
+• Real-time stock indicator on each card
+• Recently sold / Favorites quick-access row
+▌ 4.2  Cart
+• Product-level discount (% or fixed amount)
+• Overall invoice discount (% or fixed amount)
+• VAT auto-calculated (inclusive or exclusive based on settings)
+• Quantity edit inline
+• Remove item from cart
+• Hold sale — save cart and start new sale
+• Recall held sale
+• Add customer to invoice
+• Add sale note
+▌ 4.3  Payment & Checkout
+Split payment is mandatory. Support all combinations:
+Method
+Notes
+Cash
+Auto-calculate change. Show: Paid NPR X → Change NPR Y
+Bank Transfer
+Record bank name, reference number
+Card
+Record card type, last 4 digits, approval code
+QR Code
+Generic QR payment (print/display QR)
+eSewa
+Nepal — eSewa SDK integration, auto-verify transaction
+Khalti
+Nepal — Khalti SDK integration, auto-verify transaction
+Fonepay
+Nepal — Fonepay integration
+Credit
+Partial or full credit — creates customer receivable automatically
+Split
+Any combination of above in one invoice. E.g.: Cash 10k + Khalti 5k + Credit 10k
+▌ 4.4  Sale Workflow
+Full lifecycle from estimate to VAT bill:
+• Estimate → Customer approval → Sales Order → Invoice → Payment → VAT Bill
+• Convert Estimate to Invoice without re-entering data
+• Convert Quotation to Sale Order
+• Partial invoicing (invoice part of a large order)
+▌ 4.5  Nepal IRD VAT Compliance
+• VAT registration number on all bills
+• IRD-compliant VAT Invoice format (with PAN/VAT of buyer when over NPR 5,000)
+• Separate VAT Input and VAT Output accounts
+• VAT report for quarterly/monthly IRD filing
+• VAT-inclusive and VAT-exclusive pricing support
+• Print VAT Bill with required IRD fields
+▌ 4.6  Invoice Templates
+• Estimate
+• Quotation
+• Sales Invoice (non-VAT)
+• VAT Invoice (IRD compliant)
+• Purchase Invoice
+• Payment Receipt
+• Credit Note (for returns/refunds)
+• Debit Note
+All templates include: Company logo, PAN/VAT, Address, Phone, QR code, Authorized signature, Terms & Conditions.
+▌ PHASE 5 — Purchase & Supplier Management
+▌ 5.1  Purchase Workflow
+• Purchase Request → Purchase Order → Goods Received Note → Purchase Invoice → Supplier Payment
+• Partial delivery support (order 100, receive 60 today, 40 later)
+• Purchase price tracking history per product (for profit calculation)
+▌ 5.2  Supplier Profile
+• Name, Company, Phone, Address, PAN/VAT, Contact Person
+• Credit Limit, Payment Terms (Net 7/15/30)
+• Opening Balance, Total Purchase, Total Paid, Outstanding
+• Supplier Statement: Date | Description | Debit | Credit | Balance
+• Supplier Ledger with full transaction history
+▌ 5.3  Purchase Invoice Fields
+• Supplier, Date, Invoice Number, Reference
+• Products, Quantity, Purchase Price, Discount, VAT
+• Freight / Transport Cost, Other Costs
+• Total, Paid, Due, Payment Method
+• Attachment: photo/scan of supplier bill
+▌ PHASE 6 — Customer & Debtor Management
+▌ 6.1  Customer Profile
+• Name, Company, Phone, Address, PAN/VAT (for B2B)
+• Credit Limit, Payment Terms
+• Opening Balance, Total Purchases, Total Paid, Outstanding
+• Customer Ledger: Opening Balance + Credit Sales − Payments − Returns = Outstanding
+• Full purchase history, payment history, return history, quotation history
+▌ 6.2  Credit Sales
+• Invoice Total − Amount Paid = Credit Balance → auto-creates Customer Receivable
+• Partial payments supported
+• Receive payment against specific invoice or open credit
+• Credit limit enforcement (warn or block based on settings)
+• Outstanding aging report: Current / 30 Days / 60 Days / 90 Days+
+▌ 6.3  Payment Reminders
+• Dashboard widget: Due Today / Due in 7 Days / Overdue
+• Sparrow SMS integration for Nepal — auto-send reminder SMS
+• Manual SMS / notification trigger by staff
+• Email reminders (future)
+▌ PHASE 7 — Accounting
+The financial backbone
+▌ 7.1  Chart of Accounts
+Account Type
+Accounts
+Assets
+Cash, Bank, Customer Receivables, Stock / Inventory, Equipment, Prepaid Expenses
+Liabilities
+Supplier Payables, VAT Payable, Loans, Accrued Expenses
+Equity
+Owner Capital, Retained Earnings
+Income
+Sales Revenue, Other Income, Interest Income
+Cost of Goods Sold
+COGS, Purchase Returns, Freight In
+Expenses
+Rent, Electricity, Salary, Transport, Marketing, Office, Miscellaneous
+Tax Accounts
+VAT Output (collected from customers), VAT Input (paid to suppliers)
+▌ 7.2  Financial Reports
+• Profit & Loss Statement (with date filter: daily / weekly / monthly / yearly / custom)
+• Balance Sheet
+• Trial Balance
+• Cash Book
+• Bank Book
+• General Ledger
+• Account Statement (per account)
+• Receivable Aging Report
+• Payable Aging Report
+• VAT Report (for IRD filing)
+▌ 7.3  Profit & Loss Detail
+Sales Revenue − Sales Return = Net Sales → − COGS = Gross Profit → − Operating Expenses = Net Profit
+Filter by: Today, This Week, This Month, Last Month, Quarter, Half Year, This Year, Custom Date Range.
+▌ PHASE 8 — Quotation & Estimate Module
+Hardware shops run on quotations
+▌ 8.1  Quotation Fields
+• Customer, Company, Project Name
+• Products, Quantity, Unit Price, Discount, VAT
+• Validity Date, Terms & Conditions, Delivery Time
+• Prepared By, Approved By fields
+• Status: Draft / Sent / Accepted / Rejected / Expired
+▌ 8.2  Quotation Actions
+• Download as PDF
+• Print
+• Send via SMS / Email / WhatsApp link
+• Convert to Sale Order (one click)
+• Clone quotation for similar new customer
+• Quotation version history
+▌ 8.3  Estimate Workflow
+• Estimate (quick price list for customer) → Customer approves → Convert to Invoice
+• No data re-entry required on conversion
+• Estimate can be partial (some items converted, some pending)
+▌ PHASE 9 — Returns & Exchanges
+▌ 9.1  Sales Return
+• Reference original invoice
+• Select which items to return (partial return supported)
+• Auto: reduce sales revenue, increase stock, update customer ledger
+• Issue: Cash Refund or Store Credit (credit note)
+• Profit auto-recalculated
+▌ 9.2  Purchase Return
+• Reference original purchase bill
+• Select items to return to supplier
+• Auto: reduce stock, reduce supplier payable
+• Generate Debit Note for supplier
+▌ 9.3  Exchange
+• Customer exchanges product → return original + create new sale in same transaction
+• Price difference settled as cash or credit
+▌ PHASE 10 — Reports & Analytics
+▌ 10.1  Sales Reports
+• Daily / Weekly / Monthly / Yearly Sales Summary
+• Sales by Product, Brand, Category
+• Sales by Employee (staff performance)
+• Sales by Customer
+• Sales by Payment Method
+• Hourly sales pattern (peak hours analysis)
+▌ 10.2  Inventory Reports
+• Stock Summary (current stock value)
+• Stock Valuation (FIFO / Average Cost)
+• Stock Movement History
+• Low Stock Report
+• Dead Stock Report (no movement 90+ days)
+• Fast-Moving vs Slow-Moving Products
+▌ 10.3  Analytics Dashboard (Executive View)
+• KPI cards: Total Sales, Total Purchase, Gross Profit, Net Profit, Outstanding Receivable, Payable, Cash Balance
+• Sales trend chart (last 12 months)
+• Top 10 products by revenue
+• Top 10 customers by purchase value
+• Gross Margin % and Net Profit %
+• Inventory value over time
+▌ 10.4  Export Options
+• All reports exportable as PDF and Excel (.xlsx)
+• Date range filter on every report
+• Print-ready format
+▌ PHASE 11 — Warehouse & Multi-Branch Stock
+Design for multi-warehouse from day one — even if you start with one location. Adding it later requires a full database restructure.
+• Each warehouse/branch has its own stock ledger
+• Stock Transfer: Warehouse A → Warehouse B (requires approval)
+• Transfer document generated with products, quantities, date
+• Receiving warehouse confirms receipt
+• Stock Adjustment per warehouse (with reason code)
+• Damaged / Write-off management per warehouse
+• Inter-branch sales (future)
+▌ PHASE 12 — Expense Management
+• Expense Categories: Rent, Electricity, Internet, Salary, Transport, Fuel, Repair, Marketing, Office, Miscellaneous
+• Each expense: Category, Amount, Date, Payment Method, Description, Receipt Attachment
+• Approval workflow: Expense > NPR 50,000 → Manager approval required
+• Expense report by category, by month, by employee
+▌ PHASE 13 — Warranty & Serial Number Management
+Critical for electrical shop — UPS, inverters, CCTV, motors
+▌ 13.1  Serial Number Tracking
+• Assign serial numbers at purchase receiving
+• Each serial: status = In Stock / Sold / Returned / Damaged / Under Warranty
+• Sale automatically links serial to customer + invoice
+▌ 13.2  Warranty
+• Warranty period per product type (7-day replacement, 6-month, 1-year, 2-year)
+• Warranty record: Product, Serial, Customer, Invoice, Purchase Date, Warranty Start/End
+• Warranty Claim: Issue description, Status (Pending / In Progress / Resolved)
+• Alert when warranty is about to expire
+▌ PHASE 14 — HR & Task Management
+• Employee profiles: Name, Role, Phone, Salary, Join Date
+• Attendance: Daily check-in/check-out
+• Task Assignment: Assign tasks to employees, set deadlines, track completion
+• Role-based access automatically linked to employee
+▌ PHASE 15 — Notifications, Audit Log & Global Search
+▌ 15.1  Notification Center
+• 🔴 Low Stock / Out of Stock
+• 🟠 Overdue Customer Payment
+• 🟡 Pending Discount / Expense Approval
+• 🔵 New Order / Purchase Received
+• 🟣 Supplier Payment Due
+• 🟢 Payment Received
+• Sparrow SMS for critical alerts (Nepal)
+▌ 15.2  Audit Log
+• Every action logged: Who, What, When, Old Value, New Value
+• Login / Logout history with IP and device
+• Invoice creation, edit, delete — with reason required for edits
+• Stock adjustments, price changes, permission changes
+• Admin-only view, cannot be deleted
+▌ 15.3  Global Search
+One search bar searches everything: Invoice number, Customer name, Phone, SKU, Product name, Supplier, Serial number — instantly shows matching record.
+▌ PHASE 16 — Settings & Security Configuration
+▌ 16.1  Company Settings
+• Company Name, Logo, Address, PAN, VAT Number, Phone, Email
+• Invoice prefix, starting number, terms, footer, signature
+• Tax rules: VAT inclusive/exclusive, VAT % (currently 13% Nepal)
+• Payment method configuration
+▌ 16.2  Backup & Restore
+• Automated daily backup at 2:00 AM
+• Store backups locally + cloud (Google Drive / S3)
+• Admin can download backup, restore backup, view backup history
+• Manual backup trigger anytime
+▌ PHASE 17 — Project-Based Sales
+For hardware shops supplying to construction projects
+• Create a Project: Name, Customer, Location, Estimated Value
+• Link Quotations, Sales Invoices, Payments to the project
+• Track materials delivered vs. quoted
+• Outstanding per project
+• Project-level Profit & Loss
+▌ PHASE 18 — Mobile Responsive & API Polish
+• Web app fully responsive (Next.js) — works on mobile browser
+• Owner can view dashboard / sales / profit from any device
+• Sales staff can use tablet for POS
+• REST API designed to be consumed by a future native mobile app
+• Offline POS: IndexedDB stores cart and syncs when internet returns
+▌ Complete Module Priority Table
+#
+Module / Feature
+Key Components
+Priority
+1
+Foundation & Architecture
+DB ERD, Tech Stack, Transaction Engine
+⭐⭐⭐⭐⭐
+2
+Login & RBAC
+Roles, Permissions, 2FA, Session
+⭐⭐⭐⭐⭐
+3
+POS / Sales
+Cart, Payment, Invoice, VAT
+⭐⭐⭐⭐⭐
+4
+Inventory / Stock
+Products, Units, Movement Ledger
+⭐⭐⭐⭐⭐
+5
+Purchase
+PO, GRN, Supplier Invoice, Returns
+⭐⭐⭐⭐⭐
+6
+Customers / Debtors
+CRM, Credit, Ledger, Reminders
+⭐⭐⭐⭐⭐
+7
+Suppliers / Creditors
+Profile, Ledger, Payables
+⭐⭐⭐⭐⭐
+8
+Accounting
+COA, Ledger, P&L, Balance Sheet
+⭐⭐⭐⭐⭐
+9
+Nepal IRD VAT Billing
+VAT Invoice, VAT Report, PAN/VAT
+⭐⭐⭐⭐⭐
+10
+Reports & Analytics
+All reports, export, executive dashboard
+⭐⭐⭐⭐⭐
+11
+Quotation & Estimate
+PDF, Convert to Sale, Version History
+⭐⭐⭐⭐⭐
+12
+Returns (Sales & Purchase)
+Credit Note, Debit Note, Stock Restore
+⭐⭐⭐⭐⭐
+13
+Barcode System
+USB scanner, camera, label printing
+⭐⭐⭐⭐⭐
+14
+Audit Log
+All actions, admin-only, non-deletable
+⭐⭐⭐⭐⭐
+15
+Expense Management
+Categories, Approval, Attachments
+⭐⭐⭐⭐
+16
+Multi-Warehouse
+Separate stock, Transfer, Adjustment
+⭐⭐⭐⭐
+17
+Warranty & Serial No.
+Tracking, Claims, Service History
+⭐⭐⭐⭐
+18
+Notifications & SMS
+Sparrow SMS, Low Stock, Overdue
+⭐⭐⭐⭐
+19
+Approval System
+Discount, Expense, Stock Adjustment
+⭐⭐⭐⭐
+20
+Global Search
+Invoice, Customer, Product, Serial
+⭐⭐⭐⭐
+21
+Project-Based Sales
+Project CRM, Material Tracking
+⭐⭐⭐⭐
+22
+Price Levels
+Retail, Wholesale, Dealer, Project
+⭐⭐⭐⭐
+23
+HR & Task Management
+Employees, Attendance, Tasks
+⭐⭐⭐
+24
+Mobile Responsive
+Next.js responsive, tablet POS
+⭐⭐⭐
+25
+Offline POS
+IndexedDB, Service Worker, Sync
+⭐⭐⭐
+26
+Future Mobile App
+REST API ready, Owner dashboard
+⭐⭐⭐
+27
+Loyalty / CRM Features
+Points, Offers, Customer groups
+⭐⭐
+▌ Recommended Sidebar Navigation
+Section
+Sub-items
+🏠 Dashboard
+KPIs, Charts, Alerts, Quick Actions
+🛒 POS / Sales
+New Sale, Sales List, Estimates, Quotations, Orders, Returns
+📦 Inventory
+Products, Categories, Brands, Stock, Movements, Adjustments, Transfers, Units, Warehouses
+🚚 Purchases
+Purchase List, Purchase Orders, Goods Received, Suppliers, Purchase Returns
+👥 Customers
+Customer List, Debtors, Payments, Statements, Reminders
+🏢 Suppliers
+Supplier List, Creditors, Payments, Statements
+💰 Accounting
+Chart of Accounts, Cash Book, Bank Book, Expenses, Receivables, Payables, P&L, Balance Sheet, Ledger
+📊 Reports
+Sales Reports, Purchase Reports, Inventory Reports, Finance Reports, Tax/VAT Reports
+📈 Analytics
+Executive Dashboard, Trends, Top Products, Top Customers
+🔧 Warranty & Service
+Serial Numbers, Warranty List, Claims
+👷 Employees
+Employee List, Attendance, Roles, Permissions, Tasks
+🏗️ Projects
+Project List, Materials, Payments, P&L per Project
+🔔 Notifications
+All Alerts, SMS Log, Pending Approvals
+⚙️ Settings
+Company, Invoice, Tax, Payment Methods, Backup
+🔐 Audit Logs
+Full System Log (Admin only)
+▌ What Was Added Beyond the Original Plan
+Features missing from the source document — now included
+Added Feature
+Why It Matters
+Offline POS (IndexedDB + SW)
+Nepal power/internet cuts — POS must work without internet
+Sparrow SMS integration
+Nepal-specific SMS for payment reminders and alerts
+Purchase Request workflow
+Formal procurement — staff request before PO is issued
+Goods Received Note (GRN)
+Verify what was delivered vs. ordered before accepting stock
+Partial Delivery tracking
+Order 100 units, receive 60 now, 40 later — common in hardware
+Purchase Price History
+Track price per product over time for real profit calculation
+Inter-branch Stock Transfer approval
+Prevent unauthorized stock movement between branches
+Product Variants
+Same product in multiple sizes/specs (e.g., wire in 1mm/2.5mm)
+Expense Approval Workflow
+Expenses above threshold need manager/admin sign-off
+Quotation Version History
+Track changes to a quotation over time
+Partial Invoice (large orders)
+Invoice a portion of a large project order
+Stock Valuation Method
+FIFO or Average Cost — affects profit calculation
+Hourly Sales Analysis
+Identify peak hours for staffing decisions
+Warranty Expiry Alerts
+Proactively notify before warranty expires
+Customer Aging Report
+Current / 30 / 60 / 90+ days outstanding — standard finance tool
+Overstock Warning
+Alert when stock exceeds maximum threshold
+Project-level P&L
+Know profit per construction project supplied
+Product Image Gallery
+Multiple images per product for identification
+Credit Note / Debit Note
+Formal accounting documents for returns — IRD requirement
+Receipt attachment on expenses/purchases
+Digital records of bills and receipts
+✅  First Step
+Before writing any code: Complete the Database ERD in dbdiagram.io or draw.io. Define all tables, foreign keys, and relationships. Then build Phase 1 (Transaction Engine) as the core. Everything else sits on top of this foundation.
+🇳🇵  Nepal-Specific Priority
+IRD VAT compliance, Sparrow SMS, eSewa/Khalti/Fonepay payment gateways, and Offline POS are non-negotiable for this market. These must be planned into the architecture from Phase 1 — not added as afterthoughts.
+NepaTronix Engineering Solutions  •  Kupondole, Lalitpur, Nepal

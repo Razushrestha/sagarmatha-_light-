@@ -1,0 +1,10 @@
+{
+  "name": "sagarmatha-light-solution",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "start:api": "npm start --prefix backend",
+    "start:web": "npm start --prefix frontend"
+  }
+}
