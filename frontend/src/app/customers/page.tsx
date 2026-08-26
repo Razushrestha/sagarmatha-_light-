@@ -9,7 +9,7 @@ import { FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { customerAPI } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { Plus, Search, Users } from "lucide-react";
+import { Plus, Search, Users, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 
 interface Customer {
@@ -17,7 +17,12 @@ interface Customer {
   name: string;
   phone: string;
   company?: string;
+  email?: string;
+  address?: string;
+  pan?: string;
+  vatNumber?: string;
   customerType: string;
+  paymentTerms?: string;
   totalPurchases: number;
   outstanding: number;
   creditBalance?: number;
@@ -42,6 +47,7 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const debouncedSearch = useDebouncedValue(search, 250);
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
@@ -60,19 +66,69 @@ export default function CustomersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch]);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const openCreate = () => {
+    setEditingId(null);
+    setForm({ ...emptyForm, openingBalanceDate: todayInputDate() });
+    setShowModal(true);
+  };
+
+  const openEdit = async (customer: Customer) => {
+    setEditingId(customer._id);
+    setShowModal(true);
+    try {
+      const res = await customerAPI.getById(customer._id);
+      const c = res.data.data as Customer;
+      setForm({
+        name: c.name || "",
+        phone: c.phone || "",
+        company: c.company || "",
+        email: c.email || "",
+        address: c.address || "",
+        pan: c.pan || "",
+        vatNumber: c.vatNumber || "",
+        customerType: c.customerType || "retail",
+        creditLimit: String(c.creditLimit ?? 0),
+        paymentTerms: c.paymentTerms || "cash",
+        openingDebt: "",
+        openingCredit: "",
+        openingBalanceDate: todayInputDate(),
+      });
+    } catch {
+      setForm({
+        name: customer.name || "",
+        phone: customer.phone || "",
+        company: customer.company || "",
+        email: "",
+        address: "",
+        pan: "",
+        vatNumber: "",
+        customerType: customer.customerType || "retail",
+        creditLimit: String(customer.creditLimit ?? 0),
+        paymentTerms: "cash",
+        openingDebt: "",
+        openingCredit: "",
+        openingBalanceDate: todayInputDate(),
+      });
+    }
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.name.trim() || !form.phone.trim()) {
+      toast.error("Name and phone are required.");
+      return;
+    }
     const debt = Number(form.openingDebt) || 0;
     const credit = Number(form.openingCredit) || 0;
-    if (debt > 0 && credit > 0) {
+    if (!editingId && debt > 0 && credit > 0) {
       toast.error("Enter either previous debt or previous credit, not both.");
       return;
     }
     setSaving(true);
     try {
-      await customerAPI.create({
-        name: form.name,
-        phone: form.phone,
+      const payload: Record<string, unknown> = {
+        name: form.name.trim(),
+        phone: form.phone.trim(),
         company: form.company,
         email: form.email,
         address: form.address,
@@ -81,19 +137,40 @@ export default function CustomersPage() {
         customerType: form.customerType,
         creditLimit: Number(form.creditLimit) || 0,
         paymentTerms: form.paymentTerms,
-        openingDebt: debt,
-        openingCredit: credit,
-        openingBalanceDate: form.openingBalanceDate || todayInputDate(),
-      });
-      toast.success("Customer created!");
+      };
+      if (editingId) {
+        await customerAPI.update(editingId, payload);
+        toast.success("Customer updated");
+      } else {
+        await customerAPI.create({
+          ...payload,
+          openingDebt: debt,
+          openingCredit: credit,
+          openingBalanceDate: form.openingBalanceDate || todayInputDate(),
+        });
+        toast.success("Customer created!");
+      }
       setShowModal(false);
+      setEditingId(null);
       setForm({ ...emptyForm, openingBalanceDate: todayInputDate() });
       loadCustomers();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
-      toast.error(error.response?.data?.message || "Failed to create customer");
+      toast.error(error.response?.data?.message || (editingId ? "Failed to update customer" : "Failed to create customer"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (customer: Customer) => {
+    if (!window.confirm(`Remove ${customer.name} from the customer list?`)) return;
+    try {
+      await customerAPI.remove(customer._id);
+      toast.success("Customer removed");
+      loadCustomers();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Could not remove customer");
     }
   };
 
@@ -102,7 +179,7 @@ export default function CustomersPage() {
       <PageHeader
         title="Customers"
         action={
-          <button onClick={() => { setForm({ ...emptyForm, openingBalanceDate: todayInputDate() }); setShowModal(true); }} className="btn-primary flex items-center gap-2">
+          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" /> Add Customer
           </button>
         }
@@ -133,16 +210,17 @@ export default function CustomersPage() {
                 <th className="table-header">Debt Amount</th>
                 <th className="table-header">Credit Amount</th>
                 <th className="table-header">Credit Limit</th>
+                <th className="table-header"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-brand-50">
               {loading ? (
                 [...Array(4)].map((_, i) => (
-                  <tr key={i}><td colSpan={7} className="table-cell"><div className="h-10 bg-brand-50 rounded animate-pulse" /></td></tr>
+                  <tr key={i}><td colSpan={8} className="table-cell"><div className="h-10 bg-brand-50 rounded animate-pulse" /></td></tr>
                 ))
               ) : customers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="table-cell text-center py-12 text-gray-400">
+                  <td colSpan={8} className="table-cell text-center py-12 text-gray-400">
                     <Users className="w-12 h-12 mx-auto mb-2 opacity-50" />No customers found
                   </td>
                 </tr>
@@ -171,6 +249,16 @@ export default function CustomersPage() {
                       </span>
                     </td>
                     <td className="table-cell">{formatCurrency(c.creditLimit)}</td>
+                    <td className="table-cell">
+                      <div className="flex items-center justify-end gap-1">
+                        <button type="button" onClick={() => openEdit(c)} className="p-2 rounded-lg hover:bg-brand-100 text-brand-600" title="Edit">
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button type="button" onClick={() => handleDelete(c)} className="p-2 rounded-lg hover:bg-red-50 text-red-500" title="Delete">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -179,8 +267,8 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Add New Customer" size="lg">
-        <form onSubmit={handleCreate} className="form-modal">
+      <Modal open={showModal} onClose={() => setShowModal(false)} title={editingId ? "Edit Customer" : "Add New Customer"} size="lg">
+        <form onSubmit={handleSave} className="form-modal">
           <FormGrid cols={2}>
             <FormField label="Name" required>
               <input className="input-field" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
@@ -223,6 +311,7 @@ export default function CustomersPage() {
             </FormField>
           </FormGrid>
 
+          {!editingId && (
           <div className="rounded-lg border border-brand-100 bg-brand-50/60 p-4 space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-brand-600">Previous Balance (Optional)</p>
             <p className="text-xs text-brand-500">If this customer already owed you money or had advance credit before joining the system.</p>
@@ -259,12 +348,13 @@ export default function CustomersPage() {
               </FormField>
             </FormGrid>
           </div>
+          )}
 
           <FormField label="Address">
             <textarea className="input-field min-h-[64px] resize-y" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           </FormField>
           <FormActions className="mt-0 pt-3 border-0">
-            <button type="submit" disabled={saving} className="btn-primary">{saving ? "Saving..." : "Create Customer"}</button>
+            <button type="submit" disabled={saving} className="btn-primary">{saving ? "Saving..." : editingId ? "Save changes" : "Create Customer"}</button>
             <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
           </FormActions>
         </form>

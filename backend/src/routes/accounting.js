@@ -13,6 +13,8 @@ router.get('/profit-loss', authorize('accounting:read', 'reports:view'), account
 router.get('/balance-sheet', authorize('accounting:read', 'reports:view'), accountingController.getBalanceSheet);
 router.get('/expenses', authorize('accounting:read'), accountingController.getExpenses);
 router.post('/expenses', authorize('accounting:write'), accountingController.createExpense);
+router.put('/expenses/:id', authorize('accounting:write'), accountingController.updateExpense);
+router.delete('/expenses/:id', authorize('accounting:write'), accountingController.deleteExpense);
 router.get('/reports', authorize('reports:view', 'accounting:read'), accountingController.getReports);
 
 module.exports = router;

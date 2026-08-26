@@ -89,6 +89,20 @@ exports.updateSupplier = async (req, res) => {
   }
 };
 
+exports.deleteSupplier = async (req, res) => {
+  try {
+    const supplier = await Supplier.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
+    );
+    if (!supplier) return res.status(404).json({ success: false, message: 'Supplier not found.' });
+    res.json({ success: true, message: 'Supplier removed.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.getPurchases = async (req, res) => {
   try {
     const { page = 1, limit = 20, supplier, type, unpaid } = req.query;

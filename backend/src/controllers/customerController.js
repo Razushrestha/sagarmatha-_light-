@@ -98,9 +98,37 @@ exports.createCustomer = async (req, res) => {
 
 exports.updateCustomer = async (req, res) => {
   try {
-    const customer = await Customer.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const payload = {
+      name: req.body.name,
+      company: req.body.company,
+      phone: req.body.phone,
+      email: req.body.email,
+      address: req.body.address,
+      pan: req.body.pan,
+      vatNumber: req.body.vatNumber || req.body.pan,
+      creditLimit: Number(req.body.creditLimit) || 0,
+      paymentTerms: req.body.paymentTerms || 'cash',
+      customerType: req.body.customerType || 'retail',
+      notes: req.body.notes,
+    };
+
+    const customer = await Customer.findByIdAndUpdate(req.params.id, payload, { new: true, runValidators: true });
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found.' });
     res.json({ success: true, data: mapDebtor(customer) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteCustomer = async (req, res) => {
+  try {
+    const customer = await Customer.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
+    );
+    if (!customer) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    res.json({ success: true, message: 'Customer removed.' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

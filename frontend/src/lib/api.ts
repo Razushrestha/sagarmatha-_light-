@@ -12,6 +12,15 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+api.interceptors.request.use((config) => {
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    const headers = config.headers;
+    if (headers && typeof headers.delete === "function") headers.delete("Content-Type");
+    else if (headers) delete headers["Content-Type"];
+  }
+  return config;
+});
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -32,6 +41,8 @@ export const authAPI = {
   logout: () => api.post("/auth/logout"),
   getMe: () => api.get("/auth/me"),
   getUsers: () => api.get("/auth/users"),
+  getRoles: () => api.get("/auth/roles"),
+  updateUser: (id: string, data: object) => api.put(`/auth/users/${id}`, data),
   register: (data: object) => api.post("/auth/register", data),
 };
 
@@ -46,9 +57,7 @@ export const productAPI = {
   uploadImage: (file: File) => {
     const formData = new FormData();
     formData.append("image", file);
-    return api.post("/products/upload-image", formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+    return api.post("/products/upload-image", formData);
   },
   exportFile: (format: "csv" | "xlsx") =>
     api.get("/products/export", { params: { format }, responseType: "blob" }),
@@ -57,10 +66,7 @@ export const productAPI = {
   importFile: (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
-    return api.post("/products/import", formData, {
-      timeout: 60000,
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+    return api.post("/products/import", formData, { timeout: 60000 });
   },
 };
 
@@ -85,6 +91,7 @@ export const customerAPI = {
   getById: (id: string) => api.get(`/customers/${id}`),
   create: (data: object) => api.post("/customers", data),
   update: (id: string, data: object) => api.put(`/customers/${id}`, data),
+  remove: (id: string) => api.delete(`/customers/${id}`),
   getDebtors: () => api.get("/customers/debtors"),
   getCreditCustomers: () => api.get("/customers/credit"),
   getLedger: (id: string) => api.get(`/customers/${id}/ledger`),
@@ -108,6 +115,7 @@ export const supplierAPI = {
   getById: (id: string) => api.get(`/suppliers/${id}`),
   create: (data: object) => api.post("/suppliers", data),
   update: (id: string, data: object) => api.put(`/suppliers/${id}`, data),
+  remove: (id: string) => api.delete(`/suppliers/${id}`),
   getPurchases: (params?: Record<string, string>) => api.get("/suppliers/purchases", { params }),
   getPurchase: (id: string) => api.get(`/suppliers/purchases/${id}`),
   createPurchase: (data: object) => api.post("/suppliers/purchases", data),
@@ -144,6 +152,8 @@ export const accountingAPI = {
   getJournal: (params?: Record<string, string>) => api.get("/accounting/journal", { params }),
   getExpenses: (params?: Record<string, string>) => api.get("/accounting/expenses", { params }),
   createExpense: (data: object) => api.post("/accounting/expenses", data),
+  updateExpense: (id: string, data: object) => api.put(`/accounting/expenses/${id}`, data),
+  removeExpense: (id: string) => api.delete(`/accounting/expenses/${id}`),
   getReports: (params?: Record<string, string>) => api.get("/accounting/reports", { params }),
 };
 

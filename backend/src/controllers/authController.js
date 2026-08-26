@@ -143,3 +143,92 @@ exports.getUsers = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+exports.getRoles = async (_req, res) => {
+  try {
+    const roles = Object.entries(DEFAULT_ROLES).map(([key, config]) => ({
+      key,
+      name: config.name,
+      description: config.description,
+      landingPage: config.landingPage,
+    }));
+    res.json({ success: true, data: roles });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateUser = async (req, res) => {
+  try {
+    const { name, email, password, phone, role } = req.body;
+    const actor = req.user;
+    const user = await User.findById(req.params.id).select('+password');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+
+    const actorRole = actor.role;
+    const canManageAll = actorRole === 'super_admin';
+    const canManageLogins = canManageAll || actorRole === 'admin';
+
+    if (!canManageLogins) {
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+    }
+
+    if (!canManageAll) {
+      if (user.role === 'super_admin') {
+        return res.status(403).json({ success: false, message: 'Admin cannot change the Super Admin account.' });
+      }
+      if (role && role === 'super_admin') {
+        return res.status(403).json({ success: false, message: 'Cannot assign Super Admin role.' });
+      }
+    }
+
+    if (user.role === 'super_admin' && role && role !== 'super_admin') {
+      const remaining = await User.countDocuments({ role: 'super_admin', isActive: true, _id: { $ne: user._id } });
+      if (remaining < 1) {
+        return res.status(400).json({ success: false, message: 'Keep at least one Super Admin.' });
+      }
+    }
+
+    if (email != null) {
+      const nextEmail = String(email).toLowerCase().trim();
+      if (!nextEmail) return res.status(400).json({ success: false, message: 'Email is required.' });
+      const taken = await User.findOne({ email: nextEmail, _id: { $ne: user._id } });
+      if (taken) return res.status(400).json({ success: false, message: 'That email is already in use.' });
+      user.email = nextEmail;
+    }
+    if (name != null && String(name).trim()) user.name = String(name).trim();
+    if (phone != null) user.phone = String(phone).trim();
+    if (role && DEFAULT_ROLES[role]) user.role = role;
+    if (password) {
+      if (String(password).length < 6) {
+        return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+      }
+      user.password = password;
+    }
+
+    await user.save();
+    await createAuditLog(
+      actor._id,
+      'update',
+      'user',
+      user._id,
+      null,
+      { email: user.email, role: user.role, passwordChanged: Boolean(password) },
+      req
+    );
+
+    res.json({
+      success: true,
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isActive: user.isActive,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

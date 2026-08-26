@@ -6,7 +6,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import { productAPI } from "@/lib/api";
 import { formatCurrency, cn, getImageUrl } from "@/lib/utils";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { Plus, Search, Package, AlertTriangle, Pencil, Upload, Download } from "lucide-react";
+import { Plus, Search, Package, AlertTriangle, Pencil, Trash2, Upload, Download } from "lucide-react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
@@ -84,8 +84,17 @@ export default function ProductsPage() {
     try {
       const res = await productAPI.importFile(file);
       const { created, updated, errors } = res.data.data || {};
-      toast.success(`Imported from your file: ${created || 0} new, ${updated || 0} updated`);
-      if (errors?.length) toast.error(`${errors.length} row(s) could not be imported`);
+      if ((created || 0) + (updated || 0) > 0) {
+        toast.success(`Imported from your file: ${created || 0} new, ${updated || 0} updated`);
+      }
+      if (errors?.length) {
+        const first = errors[0];
+        toast.error(first?.message
+          ? `${errors.length} row(s) could not be imported. ${first.row ? `Row ${first.row}: ` : ""}${first.message}`
+          : `${errors.length} row(s) could not be imported`);
+      } else if ((created || 0) + (updated || 0) === 0) {
+        toast.error("No product rows were found in that file.");
+      }
       await loadProducts();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
@@ -93,6 +102,18 @@ export default function ProductsPage() {
     } finally {
       setImporting(false);
       if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const handleDelete = async (product: Product) => {
+    if (!window.confirm(`Remove ${product.name} from the product list?`)) return;
+    try {
+      await productAPI.delete(product._id);
+      toast.success("Product removed");
+      await loadProducts();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Could not remove product");
     }
   };
 
@@ -115,7 +136,7 @@ export default function ProductsPage() {
               onClick={() => fileRef.current?.click()}
               className="btn-secondary flex items-center gap-2"
             >
-              <Upload className="w-4 h-4" /> {importing ? "Importing..." : "Import"}
+              <Download className="w-4 h-4" /> {importing ? "Importing..." : "Import"}
             </button>
             <button
               type="button"
@@ -123,7 +144,7 @@ export default function ProductsPage() {
               onClick={() => handleExport("csv")}
               className="btn-secondary flex items-center gap-2"
             >
-              <Download className="w-4 h-4" /> {exporting === "csv" ? "Saving..." : "Export CSV"}
+              <Upload className="w-4 h-4" /> {exporting === "csv" ? "Saving..." : "Export CSV"}
             </button>
             <button
               type="button"
@@ -131,7 +152,7 @@ export default function ProductsPage() {
               onClick={() => handleExport("xlsx")}
               className="btn-secondary flex items-center gap-2"
             >
-              <Download className="w-4 h-4" /> {exporting === "xlsx" ? "Saving..." : "Export Excel"}
+              <Upload className="w-4 h-4" /> {exporting === "xlsx" ? "Saving..." : "Export Excel"}
             </button>
             <Link href="/inventory/products/new" className="btn-primary flex items-center gap-2">
               <Plus className="w-4 h-4" /> Add Product
@@ -218,9 +239,14 @@ export default function ProductsPage() {
                       </span>
                     </td>
                     <td className="table-cell">
-                      <Link href={`/inventory/products/${product._id}/edit`} className="p-2 rounded-lg hover:bg-brand-100 text-brand-600 inline-flex">
-                        <Pencil className="w-4 h-4" />
-                      </Link>
+                      <div className="flex items-center justify-end gap-1">
+                        <Link href={`/inventory/products/${product._id}/edit`} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium hover:bg-brand-100 text-brand-700">
+                          <Pencil className="w-3.5 h-3.5" /> Edit
+                        </Link>
+                        <button type="button" onClick={() => handleDelete(product)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium hover:bg-red-50 text-red-600">
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

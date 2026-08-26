@@ -15,5 +15,6 @@ router.post('/:id/payments', authorize('accounting:write', 'customer:edit'), cus
 router.post('/:id/credit/refund', authorize('accounting:write', 'customer:edit'), customerController.refundCredit);
 router.get('/:id', authorize('customer:read', 'pos:access'), customerController.getCustomer);
 router.put('/:id', authorize('customer:edit'), customerController.updateCustomer);
+router.delete('/:id', authorize('customer:edit', 'customer:create'), customerController.deleteCustomer);
 
 module.exports = router;

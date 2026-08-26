@@ -6,7 +6,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
 import StatsCard from "@/components/ui/StatsCard";
-import { Search, Plus, Pencil, ChevronRight, Banknote, Receipt, Wallet, Building2, Printer } from "lucide-react";
+import { Search, Plus, Pencil, Trash2, ChevronRight, Banknote, Receipt, Wallet, Building2, Printer } from "lucide-react";
 import { supplierAPI, accountingAPI } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import toast from "react-hot-toast";
@@ -163,10 +163,37 @@ export default function SuppliersPage() {
   }, [purchases, payments, suppliers]);
 
   const openAdd = () => { setEditId(null); setForm(emptyForm); setShowModal(true); };
-  const openEdit = (s: Supplier) => {
+  const openEdit = async (s: Supplier) => {
     setEditId(s._id);
     setForm({ name: s.name, company: s.company || "", phone: s.phone || "", email: "", address: "", pan: "", contactPerson: s.contactPerson || "", paymentTerms: s.paymentTerms || "net30" });
     setShowModal(true);
+    try {
+      const res = await supplierAPI.getById(s._id);
+      const full = res.data.data;
+      setForm({
+        name: full.name || s.name,
+        company: full.company || "",
+        phone: full.phone || "",
+        email: full.email || "",
+        address: full.address || "",
+        pan: full.pan || "",
+        contactPerson: full.contactPerson || "",
+        paymentTerms: full.paymentTerms || "net30",
+      });
+    } catch {
+      // keep list values
+    }
+  };
+
+  const handleDelete = async (s: Supplier) => {
+    if (!window.confirm(`Remove ${s.name} from the supplier list?`)) return;
+    try {
+      await supplierAPI.remove(s._id);
+      toast.success("Supplier removed");
+      fetchAll();
+    } catch (err: unknown) {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || "Could not remove supplier");
+    }
   };
 
   const handleSave = async () => {
@@ -293,7 +320,12 @@ export default function SuppliersPage() {
                         <Link href={`/suppliers/${s._id}`} className="p-1.5 hover:bg-brand-50 rounded-lg text-brand-600 text-xs font-medium flex items-center gap-0.5">
                           Manage <ChevronRight className="w-3.5 h-3.5" />
                         </Link>
-                        <button onClick={() => openEdit(s)} className="p-1.5 hover:bg-brand-50 rounded-lg text-gray-500"><Pencil className="w-4 h-4" /></button>
+                        <button type="button" onClick={() => openEdit(s)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium hover:bg-brand-100 text-brand-700">
+                          <Pencil className="w-3.5 h-3.5" /> Edit
+                        </button>
+                        <button type="button" onClick={() => handleDelete(s)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium hover:bg-red-50 text-red-600">
+                          <Trash2 className="w-3.5 h-3.5" /> Delete
+                        </button>
                       </div>
                     </td>
                   </tr>

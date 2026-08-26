@@ -45,7 +45,7 @@ const DEFAULT_ROLES = {
   admin: {
     name: 'Admin / Manager',
     description: 'Business operations management',
-    permissions: Object.keys(PERMISSIONS).filter(p => !['settings:manage', 'users:manage'].includes(p)),
+    permissions: Object.keys(PERMISSIONS).filter((p) => p !== 'audit:view'),
     landingPage: '/dashboard',
   },
   sales_staff: {

@@ -18,6 +18,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<string>;
   logout: () => Promise<void>;
   hasPermission: (...perms: string[]) => boolean;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,6 +58,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    const res = await authAPI.getMe();
+    setUser(res.data.data);
+  };
+
   const hasPermission = (...perms: string[]) => {
     if (!user) return false;
     if (user.role === "super_admin") return true;
@@ -64,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasPermission }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, hasPermission, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

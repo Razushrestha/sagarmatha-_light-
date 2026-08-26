@@ -19,5 +19,6 @@ router.get('/', authorize('purchase:read'), supplierController.getSuppliers);
 router.post('/', authorize('purchase:create'), supplierController.createSupplier);
 router.get('/:id', authorize('purchase:read'), supplierController.getSupplier);
 router.put('/:id', authorize('purchase:edit', 'purchase:create'), supplierController.updateSupplier);
+router.delete('/:id', authorize('purchase:edit', 'purchase:create'), supplierController.deleteSupplier);
 
 module.exports = router;

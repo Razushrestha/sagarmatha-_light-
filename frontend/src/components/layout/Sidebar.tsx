@@ -29,11 +29,7 @@ const navigation = [
   {
     name: "Purchases", icon: Truck, permission: "purchase:read",
     children: [
-      { name: "Purchase List", href: "/purchases" },
-      { name: "Purchase Orders", href: "/purchases/orders" },
       { name: "Suppliers", href: "/suppliers" },
-      { name: "Purchase Returns", href: "/purchases/returns" },
-      { name: "Payment to Suppliers", href: "/purchases/payments" },
     ],
   },
   {
