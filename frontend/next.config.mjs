@@ -4,11 +4,9 @@ const nextConfig = {
   compress: true,
   productionBrowserSourceMaps: false,
   reactStrictMode: true,
-  // OneDrive sync corrupts webpack filesystem cache — disable in dev
-  webpack: (config, { dev }) => {
-    if (dev) {
-      config.cache = false;
-    }
+  // OneDrive sync corrupts webpack filesystem cache during both dev and build
+  webpack: (config) => {
+    config.cache = false;
     return config;
   },
   async rewrites() {
