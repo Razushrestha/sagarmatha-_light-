@@ -77,6 +77,27 @@ interface PurchaseVoucherFormProps {
   saving?: boolean;
   variant?: "modal" | "embedded";
   mode?: "purchase" | "order";
+  initialPurchase?: {
+    _id: string;
+    invoiceNumber?: string;
+    supplier?: string | { _id?: string; name?: string; company?: string };
+    warehouse?: string | { _id: string };
+    notes?: string;
+    terms?: string;
+    amountPaid?: number;
+    discount?: number;
+    vatAmount?: number;
+    otherCosts?: number;
+    createdAt?: string;
+    items?: Array<{
+      product: string | { _id: string };
+      productName: string;
+      quantity: number;
+      unitPrice: number;
+      discount?: number;
+      vatRate?: number;
+    }>;
+  } | null;
   onSubmit: (payload: PurchaseVoucherPayload) => void;
   onCancel: () => void;
 }
@@ -111,6 +132,7 @@ export default function PurchaseVoucherForm({
   saving = false,
   variant = "modal",
   mode = "purchase",
+  initialPurchase = null,
   onSubmit,
   onCancel,
 }: PurchaseVoucherFormProps) {
@@ -140,6 +162,44 @@ export default function PurchaseVoucherForm({
   useEffect(() => {
     if (defaultSupplierId) setSupplierId(defaultSupplierId);
   }, [defaultSupplierId]);
+
+  useEffect(() => {
+    if (!initialPurchase) return;
+    const sid = typeof initialPurchase.supplier === "object"
+      ? initialPurchase.supplier._id
+      : initialPurchase.supplier;
+    const resolvedSupplier = sid || defaultSupplierId;
+    if (resolvedSupplier) setSupplierId(resolvedSupplier);
+    const wid = typeof initialPurchase.warehouse === "object"
+      ? initialPurchase.warehouse._id
+      : initialPurchase.warehouse || "";
+    if (wid) setWarehouseId(wid);
+    if (initialPurchase.createdAt) {
+      setVoucherDate(new Date(initialPurchase.createdAt).toISOString().split("T")[0]);
+    }
+    setNarration(initialPurchase.notes || "");
+    setTermsConditions(initialPurchase.terms || "");
+    setAmountPaid(safeNum(initialPurchase.amountPaid));
+    setIncludeDiscount(safeNum(initialPurchase.discount) > 0);
+    setDiscountPercent(safeNum(initialPurchase.discount));
+    setIncludeVat((initialPurchase.vatAmount || 0) > 0 || (initialPurchase.items || []).some((i) => (i.vatRate || 0) > 0));
+    setIncludeOtherCharges(safeNum(initialPurchase.otherCosts) > 0);
+    setOtherCharges(safeNum(initialPurchase.otherCosts));
+    setItems((initialPurchase.items || []).map((item) => {
+      const productId = typeof item.product === "object" ? item.product._id : String(item.product);
+      const product = products.find((p) => p._id === productId);
+      return {
+        productId,
+        productName: item.productName,
+        sku: product?.sku,
+        unit: product ? getProductUnit(product) : "Pcs",
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discount: item.discount || 0,
+        description: "",
+      };
+    }));
+  }, [initialPurchase, defaultSupplierId, products]);
 
   useEffect(() => {
     if (!warehouseId && warehouses.length > 0) {
@@ -291,14 +351,16 @@ export default function PurchaseVoucherForm({
               {isOrder ? "Purchase Order" : "Purchase Voucher"}
             </p>
             <h3 className="text-xl font-semibold mt-1 leading-tight">
-              {isOrder ? "New Purchase Order" : "New Purchase Entry"}
+              {isOrder ? "Purchase Order" : initialPurchase ? "Edit Purchase" : "New Purchase Entry"}
             </h3>
           </div>
           <div className="text-right shrink-0">
             <p className="text-[11px] uppercase tracking-wide text-brand-300 font-medium">
               {isOrder ? "Order No." : "Purchase No."}
             </p>
-            <p className="text-sm font-mono font-medium mt-1 text-white/95">Auto Generated</p>
+            <p className="text-sm font-mono font-medium mt-1 text-white/95">
+              {initialPurchase?.invoiceNumber || "Auto Generated"}
+            </p>
           </div>
         </div>
       </div>
@@ -607,7 +669,7 @@ export default function PurchaseVoucherForm({
           className={cn("btn-primary flex items-center gap-2 h-10 px-8", saving && "opacity-70")}
         >
           <Save className="w-4 h-4" />
-          {saving ? "Saving..." : isOrder ? "Save Purchase Order" : "Save Purchase"}
+          {saving ? "Saving..." : isOrder ? "Save Purchase Order" : initialPurchase ? "Update Purchase" : "Save Purchase"}
         </button>
       </div>
     </form>

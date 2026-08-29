@@ -8,12 +8,12 @@ import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
 import PurchaseVoucherForm, { PurchaseVoucherPayload } from "@/components/purchases/PurchaseVoucherForm";
 import SupplierPaymentForm, { SupplierPaymentPayload } from "@/components/purchases/SupplierPaymentForm";
-import { FormField, SelectField } from "@/components/ui/FormField";
+import { FormField, SelectField, SearchableSelect } from "@/components/ui/FormField";
 import { FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { supplierAPI, productAPI, miscAPI, accountingAPI } from "@/lib/api";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { COMPANY } from "@/lib/company";
-import { ArrowLeft, ShoppingCart, RotateCcw, Building2, Printer, Banknote, Plus, Truck } from "lucide-react";
+import { ArrowLeft, ShoppingCart, RotateCcw, Building2, Printer, Banknote, Plus, Truck, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
   compareSupplierLedgerLines,
@@ -44,7 +44,21 @@ interface Purchase {
   credit?: number;
   status: string;
   createdAt: string;
-  items: Array<{ product: string; productName: string; quantity: number; unitPrice: number; subtotal: number }>;
+  warehouse?: string | { _id: string; name?: string };
+  notes?: string;
+  terms?: string;
+  discount?: number;
+  vatAmount?: number;
+  otherCosts?: number;
+  items: Array<{
+    product: string | { _id: string };
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    discount?: number;
+    vatRate?: number;
+    subtotal: number;
+  }>;
 }
 
 interface SupplierPayment {
@@ -52,11 +66,19 @@ interface SupplierPayment {
   paymentNumber: string;
   voucherDate?: string;
   createdAt: string;
+  amount: number;
+  discount?: number;
+  taxDeducted?: number;
   total?: number;
   debit?: number;
   credit?: number;
   bankName?: string;
-  paidFromAccount?: { name?: string };
+  narration?: string;
+  paidFromAccount?: { _id?: string; name?: string; code?: string };
+  purchaseAllocations?: Array<{
+    amount: number;
+    purchase: string | { _id: string; invoiceNumber?: string; total?: number; amountDue?: number };
+  }>;
 }
 
 interface PurchaseReturn {
@@ -65,7 +87,21 @@ interface PurchaseReturn {
   total: number;
   refundMethod: string;
   createdAt: string;
-  originalPurchase?: { invoiceNumber: string };
+  reason?: string;
+  warehouse?: string | { _id: string };
+  items?: Array<{
+    product: string | { _id: string };
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    subtotal: number;
+  }>;
+  originalPurchase?: {
+    _id?: string;
+    invoiceNumber: string;
+    warehouse?: string | { _id: string };
+    items?: Array<{ product: string | { _id: string }; productName: string; quantity: number; unitPrice: number }>;
+  };
 }
 
 type Tab = "purchase" | "history" | "payments" | "return" | "returns";
@@ -243,10 +279,12 @@ export default function SupplierDetailPage() {
   const [tab, setTab] = useState<Tab>("history");
   const [loading, setLoading] = useState(true);
   const [showPayModal, setShowPayModal] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<SupplierPayment | null>(null);
 
   const [products, setProducts] = useState<Array<{ _id: string; name: string; sku?: string; purchasePrice: number; currentStock?: number; unit?: { name?: string; symbol?: string } }>>([]);
   const [warehouses, setWarehouses] = useState<Array<{ _id: string; name: string }>>([]);
   const [saving, setSaving] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
 
   const [selectedPurchase, setSelectedPurchase] = useState("");
   const [returnItems, setReturnItems] = useState<Array<{
@@ -255,6 +293,7 @@ export default function SupplierDetailPage() {
   }>>([]);
   const [returnReason, setReturnReason] = useState("");
   const [refundMethod, setRefundMethod] = useState("credit_note");
+  const [editingReturn, setEditingReturn] = useState<PurchaseReturn | null>(null);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -287,8 +326,14 @@ export default function SupplierDetailPage() {
   const handlePurchase = async (payload: PurchaseVoucherPayload) => {
     setSaving(true);
     try {
-      await supplierAPI.createPurchase({ ...payload, supplier: id });
-      toast.success("Purchase voucher saved!");
+      if (editingPurchase) {
+        await supplierAPI.updatePurchase(editingPurchase._id, { ...payload, supplier: id });
+        toast.success("Purchase updated!");
+        setEditingPurchase(null);
+      } else {
+        await supplierAPI.createPurchase({ ...payload, supplier: id });
+        toast.success("Purchase voucher saved!");
+      }
       loadData();
       setTab("history");
     } catch (err: unknown) {
@@ -299,18 +344,81 @@ export default function SupplierDetailPage() {
     }
   };
 
-  const selectPurchaseForReturn = (purchaseId: string) => {
+  const openEdit = async (purchaseId: string) => {
+    try {
+      const res = await supplierAPI.getPurchase(purchaseId);
+      setEditingPurchase(res.data.data);
+      setTab("purchase");
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to load purchase");
+    }
+  };
+
+  const handleDelete = async (p: Purchase) => {
+    if (!window.confirm(`Delete ${p.invoiceNumber}? Stock and supplier balance will be reversed.`)) return;
+    try {
+      await supplierAPI.deletePurchase(p._id);
+      toast.success("Purchase deleted");
+      loadData();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to delete purchase");
+    }
+  };
+
+  const fillReturnForm = (purchaseId: string, preset?: PurchaseReturn) => {
     setSelectedPurchase(purchaseId);
     const purchase = purchases.find((p) => p._id === purchaseId);
-    if (purchase) {
-      setReturnItems(purchase.items.map((i) => ({
-        product: typeof i.product === "object" ? (i.product as { _id: string })._id : String(i.product),
+    const sourceItems = purchase?.items || preset?.originalPurchase?.items || [];
+    const qtyByProduct: Record<string, number> = {};
+    for (const item of preset?.items || []) {
+      const pid = typeof item.product === "object" ? item.product._id : String(item.product);
+      qtyByProduct[pid] = item.quantity;
+    }
+    setReturnItems(sourceItems.map((i) => {
+      const product = typeof i.product === "object" ? (i.product as { _id: string })._id : String(i.product);
+      const quantity = qtyByProduct[product] || 0;
+      return {
+        product,
         productName: i.productName,
         maxQty: i.quantity,
-        quantity: 0,
+        quantity,
         unitPrice: i.unitPrice,
-        subtotal: 0,
-      })));
+        subtotal: quantity * i.unitPrice,
+      };
+    }));
+  };
+
+  const selectPurchaseForReturn = (purchaseId: string) => {
+    fillReturnForm(purchaseId);
+  };
+
+  const openEditReturn = async (returnId: string) => {
+    try {
+      const res = await supplierAPI.getReturn(returnId);
+      const data = res.data.data as PurchaseReturn;
+      const purchaseId = data.originalPurchase?._id || "";
+      setEditingReturn(data);
+      setRefundMethod(data.refundMethod || "credit_note");
+      setReturnReason(data.reason || "");
+      fillReturnForm(purchaseId, data);
+      setTab("return");
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to load return");
+    }
+  };
+
+  const handleDeleteReturn = async (r: PurchaseReturn) => {
+    if (!window.confirm(`Delete ${r.returnNumber}? Stock and supplier balance will be restored.`)) return;
+    try {
+      await supplierAPI.deletePurchaseReturn(r._id);
+      toast.success("Return deleted");
+      loadData();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to delete return");
     }
   };
 
@@ -330,7 +438,7 @@ export default function SupplierDetailPage() {
     if (!selectedPurchase || !toReturn.length) return toast.error("Select purchase and return quantities");
     setSaving(true);
     try {
-      await supplierAPI.createPurchaseReturn(selectedPurchase, {
+      const payload = {
         items: toReturn.map((i) => ({
           product: i.product,
           productName: i.productName,
@@ -343,8 +451,15 @@ export default function SupplierDetailPage() {
         vatAmount: returnTotal * 0.13,
         refundMethod,
         reason: returnReason,
-      });
-      toast.success("Goods return processed!");
+      };
+      if (editingReturn) {
+        await supplierAPI.updatePurchaseReturn(editingReturn._id, payload);
+        toast.success("Return updated!");
+      } else {
+        await supplierAPI.createPurchaseReturn(selectedPurchase, payload);
+        toast.success("Goods return processed!");
+      }
+      setEditingReturn(null);
       setSelectedPurchase("");
       setReturnItems([]);
       setReturnReason("");
@@ -366,9 +481,15 @@ export default function SupplierDetailPage() {
   const handlePay = async (payload: SupplierPaymentPayload) => {
     setSaving(true);
     try {
-      await supplierAPI.createPayment(payload);
-      toast.success("Payment recorded");
+      if (editingPayment) {
+        await supplierAPI.updatePayment(editingPayment._id, payload);
+        toast.success("Payment updated");
+      } else {
+        await supplierAPI.createPayment(payload);
+        toast.success("Payment recorded");
+      }
       setShowPayModal(false);
+      setEditingPayment(null);
       loadData();
       setTab("payments");
     } catch (err: unknown) {
@@ -376,6 +497,29 @@ export default function SupplierDetailPage() {
       toast.error(error.response?.data?.message || "Failed to record payment");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openEditPayment = async (paymentId: string) => {
+    try {
+      const res = await supplierAPI.getPayment(paymentId);
+      setEditingPayment(res.data.data);
+      setShowPayModal(true);
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to load payment");
+    }
+  };
+
+  const handleDeletePayment = async (p: SupplierPayment) => {
+    if (!window.confirm(`Delete ${p.paymentNumber}? Supplier balance will be restored.`)) return;
+    try {
+      await supplierAPI.deletePayment(p._id);
+      toast.success("Payment deleted");
+      loadData();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to delete payment");
     }
   };
 
@@ -521,7 +665,7 @@ export default function SupplierDetailPage() {
                 >
                   <Printer className="w-4 h-4" /> Print
                 </button>
-                <button type="button" onClick={() => setTab("purchase")} className="btn-primary flex items-center gap-2">
+                <button type="button" onClick={() => { setEditingPurchase(null); setTab("purchase"); }} className="btn-primary flex items-center gap-2">
                   <Plus className="w-4 h-4" /> New Purchase
                 </button>
               </>
@@ -536,7 +680,7 @@ export default function SupplierDetailPage() {
                 >
                   <Printer className="w-4 h-4" /> Print
                 </button>
-                <button type="button" onClick={() => setShowPayModal(true)} className="btn-primary flex items-center gap-2">
+                <button type="button" onClick={() => { setEditingPayment(null); setShowPayModal(true); }} className="btn-primary flex items-center gap-2">
                   <Plus className="w-4 h-4" /> New Payment to Supplier
                 </button>
               </>
@@ -570,7 +714,16 @@ export default function SupplierDetailPage() {
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => {
+              if (t.id === "purchase") setEditingPurchase(null);
+              if (t.id === "return") {
+                setEditingReturn(null);
+                setSelectedPurchase("");
+                setReturnItems([]);
+                setReturnReason("");
+              }
+              setTab(t.id);
+            }}
             className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
               tab === t.id ? "bg-brand-900 text-white" : "bg-white text-brand-600 border border-brand-200 hover:bg-brand-50"
             }`}
@@ -584,14 +737,16 @@ export default function SupplierDetailPage() {
       {tab === "purchase" && (
         <div className="card overflow-hidden">
           <PurchaseVoucherForm
+            key={editingPurchase?._id || "new"}
             suppliers={[{ _id: supplier._id, name: supplier.name, outstanding: supplier.outstanding }]}
             products={products}
             warehouses={warehouses}
             defaultSupplierId={supplier._id}
             saving={saving}
             variant="embedded"
+            initialPurchase={editingPurchase}
             onSubmit={handlePurchase}
-            onCancel={() => setTab("history")}
+            onCancel={() => { setEditingPurchase(null); setTab("history"); }}
           />
         </div>
       )}
@@ -608,7 +763,7 @@ export default function SupplierDetailPage() {
                 <th className="table-header">Payable</th>
                 <th className="table-header">Status</th>
                 <th className="table-header">Date</th>
-                <th className="table-header text-right">Print</th>
+                <th className="table-header text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-brand-50">
@@ -632,13 +787,29 @@ export default function SupplierDetailPage() {
                   <td className="table-cell"><span className="badge capitalize">{p.status}</span></td>
                   <td className="table-cell text-gray-500">{formatDateTime(p.createdAt)}</td>
                   <td className="table-cell text-right">
-                    <button
-                      type="button"
-                      onClick={() => printPurchase(p)}
-                      className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
-                    >
-                      <Printer className="w-3.5 h-3.5" /> Print
-                    </button>
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => printPurchase(p)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Print
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEdit(p._id)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(p)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -649,63 +820,86 @@ export default function SupplierDetailPage() {
       )}
 
       {tab === "payments" && (
-        <div className="card overflow-x-auto">
-          <table className="w-full table-fixed">
-            <colgroup>
-              <col style={{ width: "12%" }} />
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "14%" }} />
-              <col style={{ width: "12%" }} />
-              <col style={{ width: "13%" }} />
-              <col style={{ width: "13%" }} />
-              <col style={{ width: "14%" }} />
-            </colgroup>
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+          <table className="w-full">
             <thead>
               <tr>
-                <th className="table-header text-center">Date</th>
-                <th className="table-header text-center">Particular&apos;s</th>
-                <th className="table-header text-center">Voucher</th>
-                <th className="table-header text-center">V. No.</th>
-                <th className="table-header text-center">Debit (NPR)</th>
-                <th className="table-header text-center">Credit (NPR)</th>
-                <th className="table-header text-center">Closing</th>
+                <th className="table-header">Payment No</th>
+                <th className="table-header">Paid From</th>
+                <th className="table-header">Amount</th>
+                <th className="table-header">Total Settled</th>
+                <th className="table-header">Date</th>
+                <th className="table-header text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-brand-50">
-              {paymentLedgerRows.length === 0 ? (
+              {payments.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="table-cell text-center py-12 text-gray-400">
+                  <td colSpan={6} className="table-cell text-center py-12 text-gray-400">
                     <Banknote className="w-12 h-12 mx-auto mb-2 opacity-50" />
                     No payments yet
                   </td>
                 </tr>
-              ) : paymentLedgerRows.map((row) => (
-                <tr key={row.key} className="hover:bg-brand-50/50">
-                  <td className="table-cell text-center whitespace-nowrap">{formatDate(row.date)}</td>
-                  <td className="table-cell">{row.particulars}</td>
-                  <td className="table-cell text-center">{row.voucher}</td>
-                  <td className="table-cell text-center font-medium text-brand-700">{row.voucherNo}</td>
-                  <td className="table-cell text-right tabular-nums font-medium">{row.debit ? nprFigure(row.debit) : ""}</td>
-                  <td className="table-cell text-right tabular-nums font-medium">{row.credit ? nprFigure(row.credit) : ""}</td>
-                  <td className="table-cell text-right tabular-nums whitespace-nowrap">
-                    {closingLabel(row.closing, nprFigure)}
+              ) : payments.map((p) => (
+                <tr key={p._id} className="hover:bg-brand-50/50">
+                  <td className="table-cell font-medium text-brand-700">{p.paymentNumber}</td>
+                  <td className="table-cell">{p.bankName || p.paidFromAccount?.name || "Cash"}</td>
+                  <td className="table-cell font-medium">{formatCurrency(p.amount)}</td>
+                  <td className="table-cell">{formatCurrency(p.total ?? p.amount)}</td>
+                  <td className="table-cell text-gray-500">{formatDateTime(p.voucherDate || p.createdAt)}</td>
+                  <td className="table-cell text-right">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => printPaymentLedger()}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Print
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEditPayment(p._id)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePayment(p)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {tab === "return" && (
         <div className="card p-6">
-          <h3 className="text-lg font-semibold text-brand-900 mb-4">Goods Return to Supplier</h3>
+          <h3 className="text-lg font-semibold text-brand-900 mb-4">
+            {editingReturn ? `Edit ${editingReturn.returnNumber}` : "Goods Return to Supplier"}
+          </h3>
           <form onSubmit={handleReturn} className="form-modal">
             <FormField label="Original Purchase" required>
-              <SelectField value={selectedPurchase} onChange={selectPurchaseForReturn} placeholder="Select purchase..."
+              <SearchableSelect
+                value={selectedPurchase}
+                onChange={selectPurchaseForReturn}
+                placeholder="Select purchase..."
+                searchPlaceholder="Search by PO number or product name..."
                 options={purchases
                   .filter((p) => p.status !== "cancelled")
-                  .map((p) => ({ value: p._id, label: `${p.invoiceNumber}: ${formatCurrency(p.total)}` }))} />
+                  .map((p) => ({
+                    value: p._id,
+                    label: `${p.invoiceNumber}: ${formatCurrency(p.total)}${p.items?.length ? ` — ${p.items.map((i) => i.productName).join(", ")}` : ""}`,
+                  }))}
+              />
             </FormField>
 
             {returnItems.length > 0 && (
@@ -763,7 +957,7 @@ export default function SupplierDetailPage() {
 
             <FormActions className="mt-0 pt-3 border-0">
               <button type="submit" disabled={saving || returnTotal <= 0} className="btn-primary">
-                {saving ? "Processing..." : "Process Return"}
+                {saving ? "Processing..." : editingReturn ? "Update Return" : "Process Return"}
               </button>
             </FormActions>
           </form>
@@ -780,11 +974,12 @@ export default function SupplierDetailPage() {
                 <th className="table-header">Return Amount</th>
                 <th className="table-header">Method</th>
                 <th className="table-header">Date</th>
+                <th className="table-header text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-brand-50">
               {returns.length === 0 ? (
-                <tr><td colSpan={5} className="table-cell text-center py-12 text-gray-400">No returns yet</td></tr>
+                <tr><td colSpan={6} className="table-cell text-center py-12 text-gray-400">No returns yet</td></tr>
               ) : returns.map((r) => (
                 <tr key={r._id} className="hover:bg-brand-50/50">
                   <td className="table-cell font-medium text-brand-700">{r.returnNumber}</td>
@@ -792,6 +987,24 @@ export default function SupplierDetailPage() {
                   <td className="table-cell font-medium">{formatCurrency(r.total)}</td>
                   <td className="table-cell capitalize">{r.refundMethod?.replace("_", " ")}</td>
                   <td className="table-cell text-gray-500">{formatDateTime(r.createdAt)}</td>
+                  <td className="table-cell text-right">
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openEditReturn(r._id)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteReturn(r)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -799,14 +1012,16 @@ export default function SupplierDetailPage() {
         </div>
       )}
 
-      <Modal open={showPayModal} onClose={() => setShowPayModal(false)} size="3xl" hideHeader>
+      <Modal open={showPayModal} onClose={() => { setShowPayModal(false); setEditingPayment(null); }} size="3xl" hideHeader>
         <SupplierPaymentForm
+          key={editingPayment?._id || "new-pay"}
           suppliers={[{ _id: supplier._id, name: supplier.name, outstanding: supplier.outstanding }]}
           accounts={accounts}
           saving={saving}
           defaultSupplierId={supplier._id}
+          initialPayment={editingPayment}
           onSubmit={handlePay}
-          onCancel={() => setShowPayModal(false)}
+          onCancel={() => { setShowPayModal(false); setEditingPayment(null); }}
           loadUnpaidPurchases={loadUnpaidPurchases}
         />
       </Modal>

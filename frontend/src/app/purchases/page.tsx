@@ -8,7 +8,7 @@ import PurchaseVoucherForm, { PurchaseVoucherPayload } from "@/components/purcha
 import { supplierAPI, productAPI, miscAPI } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { COMPANY } from "@/lib/company";
-import { Plus, Truck, Printer } from "lucide-react";
+import { Plus, Truck, Printer, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { closingLabel, payableNet } from "@/lib/supplierLedger";
 
@@ -184,6 +184,21 @@ interface Purchase {
   amountDue: number;
   status: string;
   createdAt: string;
+  warehouse?: string | { _id: string; name?: string };
+  notes?: string;
+  terms?: string;
+  discount?: number;
+  vatAmount?: number;
+  otherCosts?: number;
+  items?: Array<{
+    product: string | { _id: string };
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    discount?: number;
+    vatRate?: number;
+    subtotal: number;
+  }>;
 }
 
 interface SupplierRow {
@@ -210,6 +225,7 @@ export default function PurchasesPage() {
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [warehouses, setWarehouses] = useState<Array<{ _id: string; name: string }>>([]);
   const [saving, setSaving] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
 
   useEffect(() => {
     loadPurchases();
@@ -231,20 +247,50 @@ export default function PurchasesPage() {
   const handleCreate = async (payload: PurchaseVoucherPayload) => {
     setSaving(true);
     try {
-      await supplierAPI.createPurchase({ ...payload, type: "invoice" });
-      toast.success("Purchase voucher saved!");
+      if (editingPurchase) {
+        await supplierAPI.updatePurchase(editingPurchase._id, { ...payload, type: "invoice" });
+        toast.success("Purchase updated!");
+        setEditingPurchase(null);
+      } else {
+        await supplierAPI.createPurchase({ ...payload, type: "invoice" });
+        toast.success("Purchase voucher saved!");
+      }
       setShowModal(false);
       loadPurchases();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
-      toast.error(error.response?.data?.message || "Failed to create purchase");
+      toast.error(error.response?.data?.message || "Failed to save purchase");
     } finally {
       setSaving(false);
     }
   };
 
   const openModal = () => {
+    setEditingPurchase(null);
     setShowModal(true);
+  };
+
+  const openEdit = async (purchaseId: string) => {
+    try {
+      const res = await supplierAPI.getPurchase(purchaseId);
+      setEditingPurchase(res.data.data);
+      setShowModal(true);
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to load purchase");
+    }
+  };
+
+  const handleDelete = async (p: Purchase) => {
+    if (!window.confirm(`Delete ${p.invoiceNumber}? Stock and supplier balance will be reversed.`)) return;
+    try {
+      await supplierAPI.deletePurchase(p._id);
+      toast.success("Purchase deleted");
+      loadPurchases();
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to delete purchase");
+    }
   };
 
   const purchaseLines = (p: Purchase): LedgerLine[] => {
@@ -339,7 +385,7 @@ export default function PurchasesPage() {
               <th className="table-header">Payable</th>
               <th className="table-header">Status</th>
               <th className="table-header">Date</th>
-              <th className="table-header text-right">Print</th>
+              <th className="table-header text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-50">
@@ -368,13 +414,29 @@ export default function PurchasesPage() {
                   <td className="table-cell"><span className="badge badge capitalize">{p.status}</span></td>
                   <td className="table-cell text-gray-500">{formatDateTime(p.createdAt)}</td>
                   <td className="table-cell text-right">
-                    <button
-                      type="button"
-                      onClick={() => printPurchase(p)}
-                      className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
-                    >
-                      <Printer className="w-3.5 h-3.5" /> Print
-                    </button>
+                    <div className="inline-flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => printPurchase(p)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Print
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEdit(p._id)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Pencil className="w-3.5 h-3.5" /> Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(p)}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -383,14 +445,16 @@ export default function PurchasesPage() {
         </table>
       </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} size="3xl" hideHeader>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditingPurchase(null); }} size="3xl" hideHeader>
         <PurchaseVoucherForm
+          key={editingPurchase?._id || "new"}
           suppliers={suppliers}
           products={products}
           warehouses={warehouses}
           saving={saving}
+          initialPurchase={editingPurchase}
           onSubmit={handleCreate}
-          onCancel={() => setShowModal(false)}
+          onCancel={() => { setShowModal(false); setEditingPurchase(null); }}
         />
       </Modal>
     </DashboardLayout>

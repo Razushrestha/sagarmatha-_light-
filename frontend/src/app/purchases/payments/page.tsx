@@ -14,7 +14,7 @@ import {
   withPayableClosing,
   closingLabel,
 } from "@/lib/supplierLedger";
-import { Plus, Banknote, Printer, Receipt, Wallet, Building2 } from "lucide-react";
+import { Plus, Banknote, Printer, Receipt, Wallet, Building2, Pencil, Trash2 } from "lucide-react";
 import StatsCard from "@/components/ui/StatsCard";
 import toast from "react-hot-toast";
 
@@ -190,7 +190,7 @@ interface SupplierPayment {
   paymentNumber: string;
   supplier: { _id?: string; name: string; outstanding?: number };
   bankName?: string;
-  paidFromAccount?: { name: string; code: string };
+  paidFromAccount?: { _id?: string; name: string; code: string };
   amount: number;
   discount: number;
   taxDeducted: number;
@@ -201,7 +201,10 @@ interface SupplierPayment {
   voucherDate?: string;
   createdAt: string;
   createdBy?: { name: string };
-  purchaseAllocations?: Array<{ amount: number; purchase?: { invoiceNumber?: string } }>;
+  purchaseAllocations?: Array<{
+    amount: number;
+    purchase?: string | { _id?: string; invoiceNumber?: string; total?: number; amountDue?: number; createdAt?: string };
+  }>;
 }
 
 interface PurchaseRow {
@@ -238,6 +241,7 @@ export default function SupplierPaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingPayment, setEditingPayment] = useState<SupplierPayment | null>(null);
 
   const loadPayments = async () => {
     setLoading(true);
@@ -272,9 +276,15 @@ export default function SupplierPaymentsPage() {
   const handleCreate = async (payload: SupplierPaymentPayload) => {
     setSaving(true);
     try {
-      await supplierAPI.createPayment(payload);
-      toast.success("Supplier payment saved!");
+      if (editingPayment) {
+        await supplierAPI.updatePayment(editingPayment._id, payload);
+        toast.success("Supplier payment updated!");
+      } else {
+        await supplierAPI.createPayment(payload);
+        toast.success("Supplier payment saved!");
+      }
       setShowModal(false);
+      setEditingPayment(null);
       loadPayments();
       supplierAPI.getAll({ limit: "100" }).then((r) => setSuppliers(r.data.data));
       accountingAPI.getAccounts().then((r) => setAccounts(r.data.data));
@@ -283,6 +293,30 @@ export default function SupplierPaymentsPage() {
       toast.error(error.response?.data?.message || "Failed to save payment");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openEditPayment = async (paymentId: string) => {
+    try {
+      const res = await supplierAPI.getPayment(paymentId);
+      setEditingPayment(res.data.data);
+      setShowModal(true);
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to load payment");
+    }
+  };
+
+  const handleDeletePayment = async (p: SupplierPayment) => {
+    if (!window.confirm(`Delete ${p.paymentNumber}? Supplier balance will be restored.`)) return;
+    try {
+      await supplierAPI.deletePayment(p._id);
+      toast.success("Payment deleted");
+      loadPayments();
+      supplierAPI.getAll({ limit: "100" }).then((r) => setSuppliers(r.data.data));
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to delete payment");
     }
   };
 
@@ -390,7 +424,7 @@ export default function SupplierPaymentsPage() {
             >
               <Printer className="w-4 h-4" /> Print
             </button>
-            <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2">
+            <button onClick={() => { setEditingPayment(null); setShowModal(true); }} className="btn-primary flex items-center gap-2">
               <Plus className="w-4 h-4" /> New Payment to Supplier
             </button>
           </div>
@@ -437,7 +471,7 @@ export default function SupplierPaymentsPage() {
               <th className="table-header text-center">Debit (NPR)</th>
               <th className="table-header text-center">Credit (NPR)</th>
               <th className="table-header text-center">Closing</th>
-              <th className="table-header text-center">Print</th>
+              <th className="table-header text-center">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-50">
@@ -473,13 +507,33 @@ export default function SupplierPaymentsPage() {
                     {closingLabel(row.closing, nprFigure)}
                   </td>
                   <td className="table-cell text-center">
-                    <button
-                      type="button"
-                      onClick={() => (row.payment ? printVoucher(row.payment) : printLedger(row.supplier))}
-                      className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
-                    >
-                      <Printer className="w-3.5 h-3.5" /> Print
-                    </button>
+                    <div className="inline-flex items-center justify-center gap-1 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => (row.payment ? printVoucher(row.payment) : printLedger(row.supplier))}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Print
+                      </button>
+                      {row.payment && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => openEditPayment(row.payment!._id)}
+                            className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                          >
+                            <Pencil className="w-3.5 h-3.5" /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePayment(row.payment!)}
+                            className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -488,13 +542,15 @@ export default function SupplierPaymentsPage() {
         </table>
       </div>
 
-      <Modal open={showModal} onClose={() => setShowModal(false)} size="3xl" hideHeader>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditingPayment(null); }} size="3xl" hideHeader>
         <SupplierPaymentForm
+          key={editingPayment?._id || "new-pay"}
           suppliers={suppliers}
           accounts={accounts}
           saving={saving}
+          initialPayment={editingPayment}
           onSubmit={handleCreate}
-          onCancel={() => setShowModal(false)}
+          onCancel={() => { setShowModal(false); setEditingPayment(null); }}
           loadUnpaidPurchases={loadUnpaidPurchases}
         />
       </Modal>

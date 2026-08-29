@@ -2,6 +2,7 @@ const Product = require('../models/Product');
 const { StockMovement } = require('../models/Warehouse');
 const Customer = require('../models/Customer');
 const Supplier = require('../models/Supplier');
+const PurchaseReturn = require('../models/PurchaseReturn');
 const Notification = require('../models/Notification');
 const { createAuditLog } = require('../middleware/audit');
 const { postSaleJournal, postSaleReturnJournal, postPurchaseJournal } = require('./journalService');
@@ -100,6 +101,49 @@ const processPurchase = async (purchase, userId, req) =>
 
     await postPurchaseJournal(purchase, userId, session);
     await createAuditLog(userId, 'create', 'purchase', purchase._id, null, { invoiceNumber: purchase.invoiceNumber, total: purchase.total }, req);
+
+    return { success: true };
+  });
+
+const reversePurchase = async (purchase, userId, req) =>
+  withOptionalTransaction(async (session) => {
+    const warehouseId = await resolveWarehouseId(purchase.warehouse);
+
+    for (const item of purchase.items) {
+      const product = await sessionQuery(Product.findById(item.product), session);
+      if (!product) throw new Error(`Product not found: ${item.productName}`);
+      if (product.currentStock < item.quantity) {
+        throw new Error(
+          `Cannot reverse ${purchase.invoiceNumber}. ${product.name} stock is ${product.currentStock}, need ${item.quantity} to undo this purchase.`
+        );
+      }
+      product.currentStock -= item.quantity;
+      await product.save(sessionOpts(session));
+
+      await StockMovement.create([{
+        product: product._id,
+        warehouse: warehouseId,
+        type: 'adjustment_minus',
+        quantity: -item.quantity,
+        balanceAfter: product.currentStock,
+        reference: `${purchase.invoiceNumber}-REV`,
+        referenceId: purchase._id,
+        createdBy: userId,
+      }], sessionOpts(session));
+    }
+
+    const supplier = await sessionQuery(Supplier.findById(purchase.supplier), session);
+    if (supplier) {
+      supplier.totalPurchases = Math.max(0, (supplier.totalPurchases || 0) - (purchase.total || 0));
+      supplier.totalPaid = Math.max(0, (supplier.totalPaid || 0) - (purchase.amountPaid || 0));
+      supplier.outstanding = Math.max(0, (supplier.outstanding || 0) - (purchase.amountDue || 0));
+      await supplier.save(sessionOpts(session));
+    }
+
+    await createAuditLog(userId, 'update', 'purchase', purchase._id, null, {
+      invoiceNumber: purchase.invoiceNumber,
+      reversed: true,
+    }, req);
 
     return { success: true };
   });
@@ -204,4 +248,51 @@ const processPurchaseReturn = async (purchaseReturn, originalPurchase, userId, r
     return { success: true };
   });
 
-module.exports = { processSale, processPurchase, processSaleReturn, processPurchaseReturn };
+const reversePurchaseReturn = async (purchaseReturn, originalPurchase, userId, req) =>
+  withOptionalTransaction(async (session) => {
+    const warehouseId = await resolveWarehouseId(purchaseReturn.warehouse || originalPurchase.warehouse);
+
+    for (const item of purchaseReturn.items) {
+      const product = await sessionQuery(Product.findById(item.product), session);
+      if (!product) throw new Error(`Product not found: ${item.productName}`);
+
+      product.currentStock += item.quantity;
+      await product.save(sessionOpts(session));
+
+      await StockMovement.create([{
+        product: product._id,
+        warehouse: warehouseId,
+        type: 'adjustment_plus',
+        quantity: item.quantity,
+        balanceAfter: product.currentStock,
+        reference: `${purchaseReturn.returnNumber}-REV`,
+        referenceId: purchaseReturn._id,
+        createdBy: userId,
+      }], sessionOpts(session));
+    }
+
+    const supplier = await sessionQuery(Supplier.findById(purchaseReturn.supplier), session);
+    if (supplier) {
+      supplier.totalPurchases = (supplier.totalPurchases || 0) + (purchaseReturn.total || 0);
+      supplier.outstanding = (supplier.outstanding || 0) + (purchaseReturn.total || 0);
+      await supplier.save(sessionOpts(session));
+    }
+
+    const leftoverQuery = PurchaseReturn.countDocuments({
+      originalPurchase: originalPurchase._id,
+      _id: { $ne: purchaseReturn._id },
+    });
+    const leftover = session ? await leftoverQuery.session(session) : await leftoverQuery;
+
+    originalPurchase.status = leftover > 0 ? 'returned' : 'completed';
+    await originalPurchase.save(sessionOpts(session));
+
+    await createAuditLog(userId, 'update', 'purchase', originalPurchase._id, null, {
+      returnNumber: purchaseReturn.returnNumber,
+      reversed: true,
+    }, req);
+
+    return { success: true };
+  });
+
+module.exports = { processSale, processPurchase, reversePurchase, processSaleReturn, processPurchaseReturn, reversePurchaseReturn };

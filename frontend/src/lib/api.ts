@@ -119,13 +119,21 @@ export const supplierAPI = {
   getPurchases: (params?: Record<string, string>) => api.get("/suppliers/purchases", { params }),
   getPurchase: (id: string) => api.get(`/suppliers/purchases/${id}`),
   createPurchase: (data: object) => api.post("/suppliers/purchases", data),
+  updatePurchase: (id: string, data: object) => api.put(`/suppliers/purchases/${id}`, data),
+  deletePurchase: (id: string) => api.delete(`/suppliers/purchases/${id}`),
   receivePurchaseOrder: (id: string, data?: object) =>
     api.post(`/suppliers/purchases/${id}/receive`, data),
   createPurchaseReturn: (purchaseId: string, data: object) =>
     api.post(`/suppliers/purchases/${purchaseId}/return`, data),
   getReturns: (params?: Record<string, string>) => api.get("/suppliers/returns", { params }),
+  getReturn: (id: string) => api.get(`/suppliers/returns/${id}`),
+  updatePurchaseReturn: (id: string, data: object) => api.put(`/suppliers/returns/${id}`, data),
+  deletePurchaseReturn: (id: string) => api.delete(`/suppliers/returns/${id}`),
   getPayments: (params?: Record<string, string>) => api.get("/suppliers/payments", { params }),
+  getPayment: (id: string) => api.get(`/suppliers/payments/${id}`),
   createPayment: (data: object) => api.post("/suppliers/payments", data),
+  updatePayment: (id: string, data: object) => api.put(`/suppliers/payments/${id}`, data),
+  deletePayment: (id: string) => api.delete(`/suppliers/payments/${id}`),
 };
 
 // Misc

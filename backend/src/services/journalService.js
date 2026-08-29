@@ -122,4 +122,20 @@ const postSupplierPaymentJournal = async (payment, account, userId, session) => 
   }, session);
 };
 
-module.exports = { postSaleJournal, postSaleReturnJournal, postPurchaseJournal, postSupplierPaymentJournal, postJournal, ACCOUNT_CODES };
+const reverseSupplierPaymentJournal = async (payment, account, userId, session) => {
+  const cashAmount = payment.amount || 0;
+  if (cashAmount <= 0) return;
+
+  await postJournal({
+    description: `Reverse Supplier Payment ${payment.paymentNumber}`,
+    reference: `${payment.paymentNumber}-REV`,
+    referenceId: payment._id,
+    lines: [
+      { code: account.code, debit: cashAmount },
+      { code: ACCOUNT_CODES.PAYABLE, credit: cashAmount },
+    ],
+    userId,
+  }, session);
+};
+
+module.exports = { postSaleJournal, postSaleReturnJournal, postPurchaseJournal, postSupplierPaymentJournal, reverseSupplierPaymentJournal, postJournal, ACCOUNT_CODES };

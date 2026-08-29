@@ -44,6 +44,22 @@ interface SupplierPaymentFormProps {
   accounts: AccountOption[];
   saving?: boolean;
   defaultSupplierId?: string;
+  initialPayment?: {
+    _id: string;
+    paymentNumber?: string;
+    supplier?: string | { _id?: string; name?: string; outstanding?: number };
+    voucherDate?: string;
+    paidFromAccount?: string | { _id?: string; name?: string; code?: string };
+    bankName?: string;
+    amount: number;
+    discount?: number;
+    taxDeducted?: number;
+    narration?: string;
+    purchaseAllocations?: Array<{
+      amount: number;
+      purchase?: string | { _id?: string; invoiceNumber?: string; total?: number; amountDue?: number; createdAt?: string };
+    }>;
+  } | null;
   onSubmit: (payload: SupplierPaymentPayload) => void;
   onCancel: () => void;
   loadUnpaidPurchases: (supplierId: string) => Promise<UnpaidPurchase[]>;
@@ -64,6 +80,7 @@ export default function SupplierPaymentForm({
   accounts,
   saving = false,
   defaultSupplierId = "",
+  initialPayment = null,
   onSubmit,
   onCancel,
   loadUnpaidPurchases,
@@ -89,6 +106,28 @@ export default function SupplierPaymentForm({
   }, [defaultSupplierId]);
 
   useEffect(() => {
+    if (!initialPayment) return;
+    const sid = typeof initialPayment.supplier === "object"
+      ? initialPayment.supplier._id
+      : initialPayment.supplier || defaultSupplierId;
+    if (sid) setSupplierId(sid);
+    const aid = typeof initialPayment.paidFromAccount === "object"
+      ? initialPayment.paidFromAccount._id
+      : initialPayment.paidFromAccount || "";
+    if (aid) setPaidFromAccount(aid);
+    if (initialPayment.voucherDate) {
+      setVoucherDate(new Date(initialPayment.voucherDate).toISOString().split("T")[0]);
+    }
+    setBankName(initialPayment.bankName || "");
+    setAmount(safeNum(initialPayment.amount));
+    setIncludeDiscount(safeNum(initialPayment.discount) > 0);
+    setDiscount(safeNum(initialPayment.discount));
+    setIncludeTax(safeNum(initialPayment.taxDeducted) > 0);
+    setTaxDeducted(safeNum(initialPayment.taxDeducted));
+    setNarration(initialPayment.narration || "");
+  }, [initialPayment, defaultSupplierId]);
+
+  useEffect(() => {
     if (paymentAccounts.length > 0 && !paidFromAccount) {
       setPaidFromAccount(paymentAccounts[0]._id);
     }
@@ -103,11 +142,31 @@ export default function SupplierPaymentForm({
     setLoadingPurchases(true);
     loadUnpaidPurchases(supplierId)
       .then((purchases) => {
-        setUnpaidPurchases(purchases);
-        setAllocations({});
+        const list = purchases.map((p) => ({ ...p }));
+        const allocMap: Record<string, number> = {};
+        for (const alloc of initialPayment?.purchaseAllocations || []) {
+          const purchaseRef = alloc.purchase;
+          const pid = typeof purchaseRef === "object" ? purchaseRef?._id : purchaseRef;
+          if (!pid) continue;
+          allocMap[pid] = alloc.amount;
+          const existing = list.find((p) => p._id === pid);
+          if (existing) {
+            existing.amountDue += alloc.amount;
+          } else if (typeof purchaseRef === "object") {
+            list.push({
+              _id: pid,
+              invoiceNumber: purchaseRef.invoiceNumber || pid,
+              total: purchaseRef.total || alloc.amount,
+              amountDue: (purchaseRef.amountDue || 0) + alloc.amount,
+              createdAt: purchaseRef.createdAt || new Date().toISOString(),
+            });
+          }
+        }
+        setUnpaidPurchases(list);
+        setAllocations(allocMap);
       })
       .finally(() => setLoadingPurchases(false));
-  }, [supplierId, loadUnpaidPurchases]);
+  }, [supplierId, initialPayment, loadUnpaidPurchases]);
 
   const selectedSupplier = suppliers.find((s) => s._id === supplierId);
   const selectedAccount = paymentAccounts.find((a) => a._id === paidFromAccount);
@@ -156,11 +215,13 @@ export default function SupplierPaymentForm({
         <div className="flex items-start justify-between gap-8 pr-10">
           <div>
             <p className="text-[11px] uppercase tracking-[0.18em] text-brand-300 font-medium">Payment Voucher</p>
-            <h3 className="text-xl font-semibold mt-1">Payment to Supplier</h3>
+            <h3 className="text-xl font-semibold mt-1">{initialPayment ? "Edit Payment to Supplier" : "Payment to Supplier"}</h3>
           </div>
           <div className="text-right shrink-0">
             <p className="text-[11px] uppercase tracking-wide text-brand-300 font-medium">Payment No.</p>
-            <p className="text-sm font-mono font-medium mt-1 text-white/95">Auto Generated</p>
+            <p className="text-sm font-mono font-medium mt-1 text-white/95">
+              {initialPayment?.paymentNumber || "Auto Generated"}
+            </p>
           </div>
         </div>
       </div>
@@ -345,7 +406,7 @@ export default function SupplierPaymentForm({
           className={cn("btn-primary flex items-center gap-2 h-10 px-8", saving && "opacity-70")}
         >
           <Save className="w-4 h-4" />
-          {saving ? "Saving..." : "Save Payment"}
+          {saving ? "Saving..." : initialPayment ? "Update Payment" : "Save Payment"}
         </button>
       </div>
     </form>
