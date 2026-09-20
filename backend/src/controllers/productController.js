@@ -57,9 +57,28 @@ exports.getProduct = async (req, res) => {
   }
 };
 
+function generateSku(name) {
+  const base = String(name || 'SKU')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 18) || 'SKU';
+  return `${base}-${Date.now().toString(36).slice(-5)}`.slice(0, 30);
+}
+
 exports.createProduct = async (req, res) => {
   try {
-    const product = await Product.create(req.body);
+    const body = { ...req.body };
+    if (!body.sku || !String(body.sku).trim()) {
+      body.sku = generateSku(body.name);
+    }
+    // Ensure price fields are stored as floats
+    for (const key of ['purchasePrice', 'sellingPrice', 'wholesalePrice', 'dealerPrice', 'projectPrice', 'minSellingPrice', 'vatRate', 'commissionPercent']) {
+      if (body[key] !== undefined && body[key] !== null && body[key] !== '') {
+        body[key] = parseFloat(body[key]);
+      }
+    }
+    const product = await Product.create(body);
     await createAuditLog(req.user._id, 'create', 'product', product._id, null, { name: product.name, sku: product.sku }, req);
     res.status(201).json({ success: true, data: product });
   } catch (error) {
@@ -69,8 +88,16 @@ exports.createProduct = async (req, res) => {
 
 exports.updateProduct = async (req, res) => {
   try {
+    const body = { ...req.body };
+    // Do not clear SKU from the edit form (field removed from UI)
+    if (!body.sku || !String(body.sku).trim()) delete body.sku;
+    for (const key of ['purchasePrice', 'sellingPrice', 'wholesalePrice', 'dealerPrice', 'projectPrice', 'minSellingPrice', 'vatRate', 'commissionPercent']) {
+      if (body[key] !== undefined && body[key] !== null && body[key] !== '') {
+        body[key] = parseFloat(body[key]);
+      }
+    }
     const oldProduct = await Product.findById(req.params.id);
-    const product = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const product = await Product.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found.' });
     await createAuditLog(req.user._id, 'update', 'product', product._id, { name: oldProduct.name, price: oldProduct.sellingPrice }, { name: product.name, price: product.sellingPrice }, req);
     res.json({ success: true, data: product });

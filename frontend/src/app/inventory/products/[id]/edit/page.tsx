@@ -23,7 +23,7 @@ export default function EditProductPage() {
   const [images, setImages] = useState<string[]>([]);
 
   const [form, setForm] = useState({
-    name: "", sku: "", barcode: "", category: "", brand: "", model: "",
+    name: "", barcode: "", category: "", brand: "", model: "",
     description: "", purchasePrice: "", sellingPrice: "", wholesalePrice: "", dealerPrice: "",
     minStock: "5", currentStock: "0", unit: "", warehouse: "",
     vatInclusive: true, vatRate: "13", commissionPercent: "5",
@@ -44,7 +44,6 @@ export default function EditProductPage() {
       const p = prod.data.data;
       setForm({
         name: p.name || "",
-        sku: p.sku || "",
         barcode: p.barcode || "",
         category: p.category?._id || p.category || "",
         brand: p.brand?._id || p.brand || "",
@@ -77,14 +76,14 @@ export default function EditProductPage() {
       await productAPI.update(id, {
         ...form,
         images,
-        purchasePrice: Number(form.purchasePrice),
-        sellingPrice: Number(form.sellingPrice),
-        wholesalePrice: form.wholesalePrice ? Number(form.wholesalePrice) : undefined,
-        dealerPrice: form.dealerPrice ? Number(form.dealerPrice) : undefined,
+        purchasePrice: parseFloat(form.purchasePrice) || 0,
+        sellingPrice: parseFloat(form.sellingPrice) || 0,
+        wholesalePrice: form.wholesalePrice ? parseFloat(form.wholesalePrice) : undefined,
+        dealerPrice: form.dealerPrice ? parseFloat(form.dealerPrice) : undefined,
         minStock: Number(form.minStock),
         currentStock: Number(form.currentStock),
-        vatRate: Number(form.vatRate),
-        commissionPercent: Number(form.commissionPercent) || 0,
+        vatRate: parseFloat(form.vatRate) || 0,
+        commissionPercent: parseFloat(form.commissionPercent) || 0,
       });
       toast.success("Product updated!");
       router.push("/inventory/products");
@@ -124,9 +123,6 @@ export default function EditProductPage() {
                   <FormField label="Product Name" required>
                     <input className="input-field" value={form.name} onChange={(e) => update("name", e.target.value)} required />
                   </FormField>
-                  <FormField label="SKU" required>
-                    <input className="input-field" value={form.sku} onChange={(e) => update("sku", e.target.value)} required />
-                  </FormField>
                   <FormField label="Barcode">
                     <input className="input-field" value={form.barcode} onChange={(e) => update("barcode", e.target.value)} />
                   </FormField>
@@ -147,22 +143,22 @@ export default function EditProductPage() {
               <FormSection title="Pricing (NPR)">
                 <FormGrid cols={4}>
                   <FormField label="Purchase Price" required>
-                    <input type="number" className="input-field" value={form.purchasePrice} onChange={(e) => update("purchasePrice", e.target.value)} required />
+                    <input type="number" step="any" min="0" className="input-field" value={form.purchasePrice} onChange={(e) => update("purchasePrice", e.target.value)} required />
                   </FormField>
                   <FormField label="Retail Price" required>
-                    <input type="number" className="input-field" value={form.sellingPrice} onChange={(e) => update("sellingPrice", e.target.value)} required />
+                    <input type="number" step="any" min="0" className="input-field" value={form.sellingPrice} onChange={(e) => update("sellingPrice", e.target.value)} required />
                   </FormField>
                   <FormField label="Wholesale Price">
-                    <input type="number" className="input-field" value={form.wholesalePrice} onChange={(e) => update("wholesalePrice", e.target.value)} />
+                    <input type="number" step="any" min="0" className="input-field" value={form.wholesalePrice} onChange={(e) => update("wholesalePrice", e.target.value)} />
                   </FormField>
                   <FormField label="Dealer Price">
-                    <input type="number" className="input-field" value={form.dealerPrice} onChange={(e) => update("dealerPrice", e.target.value)} />
+                    <input type="number" step="any" min="0" className="input-field" value={form.dealerPrice} onChange={(e) => update("dealerPrice", e.target.value)} />
                   </FormField>
                   <FormField label="Commission %">
-                    <input type="number" min={0} max={100} step="0.1" className="input-field" value={form.commissionPercent} onChange={(e) => update("commissionPercent", e.target.value)} />
+                    <input type="number" min={0} max={100} step="any" className="input-field" value={form.commissionPercent} onChange={(e) => update("commissionPercent", e.target.value)} />
                   </FormField>
                   <FormField label="VAT Rate (%)">
-                    <input type="number" className="input-field" value={form.vatRate} onChange={(e) => update("vatRate", e.target.value)} />
+                    <input type="number" step="any" min="0" className="input-field" value={form.vatRate} onChange={(e) => update("vatRate", e.target.value)} />
                   </FormField>
                 </FormGrid>
                 <div className="mt-3">
