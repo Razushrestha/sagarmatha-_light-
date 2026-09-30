@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
@@ -8,12 +8,14 @@ import { FormField, SelectField } from "@/components/ui/FormField";
 import { FormBackLink, FormCard, FormSection, FormGrid, FormActions, FormCheckbox } from "@/components/ui/FormLayout";
 import ImageUpload from "@/components/ui/ImageUpload";
 import { productAPI, miscAPI } from "@/lib/api";
+import { isAltN, isModS, useHotkey } from "@/lib/useHotkey";
 import toast from "react-hot-toast";
 
 export default function EditProductPage() {
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
+  const formRef = useRef<HTMLFormElement>(null);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [categories, setCategories] = useState<Array<{ _id: string; name: string }>>([]);
@@ -71,6 +73,7 @@ export default function EditProductPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     try {
       await productAPI.update(id, {
@@ -95,6 +98,16 @@ export default function EditProductPage() {
     }
   };
 
+  const saveProduct = useCallback(() => {
+    formRef.current?.requestSubmit();
+  }, []);
+  const openNewProduct = useCallback(() => {
+    router.push("/inventory/products/new");
+  }, [router]);
+
+  useHotkey(isModS, saveProduct, { enabled: !loading && !fetching });
+  useHotkey(isAltN, openNewProduct, { enabled: !fetching });
+
   if (fetching) {
     return (
       <DashboardLayout>
@@ -108,7 +121,7 @@ export default function EditProductPage() {
       <FormBackLink href="/inventory/products" label="Back to Products" />
       <PageHeader title="Edit Product" />
 
-      <form onSubmit={handleSubmit}>
+      <form ref={formRef} onSubmit={handleSubmit}>
         <FormCard>
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
             <div className="xl:col-span-3">
@@ -192,8 +205,9 @@ export default function EditProductPage() {
           </div>
 
           <FormActions>
-            <button type="submit" disabled={loading} className="btn-primary">
+            <button type="submit" disabled={loading} className="btn-primary" title="Ctrl+S">
               {loading ? "Saving..." : "Save Changes"}
+              {!loading && <kbd className="hidden sm:inline ml-2 text-[10px] font-medium opacity-80 border border-white/30 rounded px-1 py-0.5">Ctrl+S</kbd>}
             </button>
             <button type="button" onClick={() => router.push("/inventory/products")} className="btn-secondary">Cancel</button>
           </FormActions>

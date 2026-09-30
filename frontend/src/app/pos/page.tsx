@@ -265,7 +265,7 @@ export default function POSPage() {
   }, [customerSearch, customerPanel]);
 
   const loadProducts = async (q?: string, categoryId?: string) => {
-    const params: Record<string, string> = { limit: "50" };
+    const params: Record<string, string> = {};
     if (q?.trim()) params.search = q.trim();
     const cat = categoryId ?? selectedCategory;
     if (cat) params.category = cat;
@@ -275,7 +275,7 @@ export default function POSPage() {
 
   const handleCategoryChange = (categoryId: string) => {
     setSelectedCategory(categoryId);
-    const params: Record<string, string> = { limit: "50" };
+    const params: Record<string, string> = {};
     if (search.trim()) params.search = search.trim();
     if (categoryId) params.category = categoryId;
     productAPI.getAll(params).then((r) => setProducts(r.data.data));

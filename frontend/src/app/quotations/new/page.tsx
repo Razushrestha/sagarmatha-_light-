@@ -25,7 +25,7 @@ export default function NewQuotationPage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    productAPI.getAll({ limit: "100" }).then((r) => setProducts(r.data.data));
+    productAPI.getAll().then((r) => setProducts(r.data.data));
     customerAPI.getAll({ limit: "100" }).then((r) => setCustomers(r.data.data));
   }, []);
 

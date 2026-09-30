@@ -47,8 +47,10 @@ export const authAPI = {
 };
 
 // Products
+export const ALL_RECORDS = "0";
+
 export const productAPI = {
-  getAll: (params?: Record<string, string>) => api.get("/products", { params }),
+  getAll: (params?: Record<string, string>) => api.get("/products", { params: { limit: ALL_RECORDS, ...params } }),
   getById: (id: string) => api.get(`/products/${id}`),
   getByBarcode: (code: string) => api.get(`/products/barcode/${code}`),
   create: (data: object) => api.post("/products", data),

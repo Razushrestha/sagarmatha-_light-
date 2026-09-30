@@ -318,7 +318,7 @@ export default function SupplierDetailPage() {
 
   useEffect(() => {
     loadData();
-    productAPI.getAll({ limit: "200" }).then((r) => setProducts(r.data.data));
+    productAPI.getAll().then((r) => setProducts(r.data.data));
     miscAPI.getWarehouses().then((r) => setWarehouses(r.data.data));
     accountingAPI.getAccounts().then((r) => setAccounts(r.data.data || []));
   }, [loadData]);

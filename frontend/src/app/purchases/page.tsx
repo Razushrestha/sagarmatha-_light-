@@ -230,7 +230,7 @@ export default function PurchasesPage() {
   useEffect(() => {
     loadPurchases();
     supplierAPI.getAll({ limit: "100" }).then((r) => setSuppliers(r.data.data));
-    productAPI.getAll({ limit: "200" }).then((r) => setProducts(r.data.data));
+    productAPI.getAll().then((r) => setProducts(r.data.data));
     miscAPI.getWarehouses().then((r) => setWarehouses(r.data.data));
   }, []);
 

@@ -10,7 +10,7 @@ const {
 
 exports.getProducts = async (req, res) => {
   try {
-    const { search, category, brand, page = 1, limit = 20, lowStock } = req.query;
+    const { search, category, brand, page = 1, limit, lowStock } = req.query;
     const query = { isActive: true };
 
     if (search) {
@@ -26,21 +26,33 @@ exports.getProducts = async (req, res) => {
       query.$expr = { $lte: ['$currentStock', '$minStock'] };
     }
 
-    const skip = (page - 1) * limit;
+    const unlimited = limit === '0' || String(limit || '').toLowerCase() === 'all';
+    const take = unlimited ? 0 : Number(limit ?? 20);
+    const pageNum = Number(page) || 1;
+    const skip = take > 0 ? (pageNum - 1) * take : 0;
+
+    let findQuery = Product.find(query)
+      .populate('category', 'name')
+      .populate('brand', 'name')
+      .populate('unit', 'name shortName')
+      .select('-priceHistory')
+      .sort({ name: 1 });
+    if (take > 0) findQuery = findQuery.skip(skip).limit(take);
+
     const [products, total] = await Promise.all([
-      Product.find(query)
-        .populate('category', 'name')
-        .populate('brand', 'name')
-        .populate('unit', 'name shortName')
-        .select('-priceHistory')
-        .sort({ name: 1 })
-        .skip(skip)
-        .limit(Number(limit))
-        .lean(),
+      findQuery.lean(),
       Product.countDocuments(query),
     ]);
 
-    res.json({ success: true, data: products, pagination: { total, page: Number(page), pages: Math.ceil(total / limit) } });
+    res.json({
+      success: true,
+      data: products,
+      pagination: {
+        total,
+        page: pageNum,
+        pages: take > 0 ? Math.ceil(total / take) : 1,
+      },
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

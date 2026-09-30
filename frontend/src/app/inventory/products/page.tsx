@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import { productAPI } from "@/lib/api";
 import { formatCurrency, cn, getImageUrl } from "@/lib/utils";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import { isAltN, useHotkey } from "@/lib/useHotkey";
 import { Plus, Search, Package, AlertTriangle, Pencil, Trash2, Upload, Download } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 
 interface Product {
@@ -38,6 +40,7 @@ async function saveBlob(request: Promise<{ data: Blob }>, fallbackName: string) 
 }
 
 export default function ProductsPage() {
+  const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -48,7 +51,7 @@ export default function ProductsPage() {
 
   const loadProducts = () => {
     setLoading(true);
-    return productAPI.getAll({ search: debouncedSearch, limit: "50" })
+    return productAPI.getAll({ search: debouncedSearch })
       .then((res) => setProducts(res.data.data))
       .finally(() => setLoading(false));
   };
@@ -56,7 +59,7 @@ export default function ProductsPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    productAPI.getAll({ search: debouncedSearch, limit: "50" })
+    productAPI.getAll({ search: debouncedSearch })
       .then((res) => {
         if (!cancelled) setProducts(res.data.data);
       })
@@ -117,6 +120,12 @@ export default function ProductsPage() {
     }
   };
 
+  const openNewProduct = useCallback(() => {
+    router.push("/inventory/products/new");
+  }, [router]);
+
+  useHotkey(isAltN, openNewProduct);
+
   return (
     <DashboardLayout>
       <PageHeader
@@ -154,8 +163,9 @@ export default function ProductsPage() {
             >
               <Upload className="w-4 h-4" /> {exporting === "xlsx" ? "Saving..." : "Export Excel"}
             </button>
-            <Link href="/inventory/products/new" className="btn-primary flex items-center gap-2">
+            <Link href="/inventory/products/new" className="btn-primary flex items-center gap-2" title="Alt+N">
               <Plus className="w-4 h-4" /> Add Product
+              <kbd className="hidden sm:inline ml-1 text-[10px] font-medium opacity-80 border border-white/30 rounded px-1 py-0.5">Alt+N</kbd>
             </Link>
           </>
         }
