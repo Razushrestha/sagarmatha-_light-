@@ -151,6 +151,47 @@ const reversePurchase = async (purchase, userId, req) =>
     return { success: true };
   });
 
+const reverseSale = async (sale, userId, req) =>
+  withOptionalTransaction(async (session) => {
+    const warehouseId = await resolveWarehouseId(sale.warehouse);
+
+    for (const item of sale.items) {
+      const product = await sessionQuery(Product.findById(item.product), session);
+      if (!product) throw new Error(`Product not found: ${item.productName}`);
+      product.currentStock += item.quantity;
+      await product.save(sessionOpts(session));
+
+      await StockMovement.create([{
+        product: product._id,
+        warehouse: warehouseId,
+        type: 'sale_return',
+        quantity: item.quantity,
+        balanceAfter: product.currentStock,
+        reference: `${sale.invoiceNumber}-REV`,
+        referenceId: sale._id,
+        createdBy: userId,
+      }], sessionOpts(session));
+    }
+
+    const customerId = sale.customer?._id || sale.customer;
+    if (customerId) {
+      const customer = await sessionQuery(Customer.findById(customerId), session);
+      if (customer) {
+        customer.totalPurchases = Math.max(0, (customer.totalPurchases || 0) - (sale.total || 0));
+        customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - (sale.amountPaid || 0));
+        customer.outstanding = Math.max(0, (customer.outstanding || 0) - (sale.amountDue || 0));
+        await customer.save(sessionOpts(session));
+      }
+    }
+
+    await createAuditLog(userId, 'update', 'sale', sale._id, null, {
+      invoiceNumber: sale.invoiceNumber,
+      reversed: true,
+    }, req);
+
+    return { success: true };
+  });
+
 const processSaleReturn = async (saleReturn, originalSale, userId, req, extra = {}) =>
   withOptionalTransaction(async (session) => {
     const parts = extra.parts || [{
@@ -312,4 +353,4 @@ const reversePurchaseReturn = async (purchaseReturn, originalPurchase, userId, r
     return { success: true };
   });
 
-module.exports = { processSale, processPurchase, reversePurchase, processSaleReturn, processPurchaseReturn, reversePurchaseReturn };
+module.exports = { processSale, processPurchase, reversePurchase, reverseSale, processSaleReturn, processPurchaseReturn, reversePurchaseReturn };

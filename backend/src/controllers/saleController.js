@@ -2,12 +2,27 @@ const Sale = require('../models/Sale');
 const Customer = require('../models/Customer');
 const Settings = require('../models/Settings');
 const SaleReturn = require('../models/SaleReturn');
-const { processSale, processSaleReturn } = require('../services/transactionService');
+const { processSale, processSaleReturn, reverseSale } = require('../services/transactionService');
 const CustomerPayment = require('../models/CustomerPayment');
 const { normalizeSalePaymentFields, hasCreditPayment, reconcileCustomerOutstanding } = require('../utils/salePayments');
 const { getDefaultWarehouseId } = require('../utils/warehouse');
 const { applyCommissionToSaleBody } = require('../utils/electricianCommission');
 const { allocateReturnLines, round2 } = require('../utils/saleReturn');
+
+function saleWasPosted(sale) {
+  return ['invoice', 'estimate'].includes(sale.type) && sale.status === 'completed' && !sale.isHeld;
+}
+
+function saleId(value) {
+  if (!value) return null;
+  return String(value._id || value);
+}
+
+async function saleReturnCount(saleIdValue) {
+  return SaleReturn.countDocuments({
+    $or: [{ originalSale: saleIdValue }, { originalSales: saleIdValue }],
+  });
+}
 
 const generateNumber = async (prefix) => {
   const settings = await Settings.findOne();
@@ -163,6 +178,118 @@ exports.getHeldSales = async (req, res) => {
       .sort({ heldAt: -1 })
       .lean();
     res.json({ success: true, data: held });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateSale = async (req, res) => {
+  try {
+    const sale = await Sale.findById(req.params.id);
+    if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
+    if (['cancelled', 'returned', 'partial_return'].includes(sale.status)) {
+      return res.status(400).json({ success: false, message: 'Returned or cancelled sales cannot be edited.' });
+    }
+
+    const returnsCount = await saleReturnCount(sale._id);
+    if (returnsCount > 0) {
+      return res.status(400).json({ success: false, message: 'This sale has returns. Reverse the returns before editing.' });
+    }
+
+    const previousCustomerId = saleId(sale.customer);
+    const wasPosted = saleWasPosted(sale);
+    if (wasPosted) {
+      await reverseSale(sale, req.user._id, req);
+    }
+
+    const payload = { ...req.body };
+    await applyCommissionToSaleBody(payload);
+
+    const payments = payload.payments || sale.payments || [];
+    let { amountPaid, amountDue } = normalizeSalePaymentFields(payload.total ?? sale.total, payments, {
+      amountPaid: payload.amountPaid,
+      amountDue: payload.amountDue,
+    });
+
+    if (hasCreditPayment(payments) && amountDue <= 0) {
+      const safeTotal = Number(payload.total ?? sale.total) || 0;
+      const cashPaid = payments
+        .filter((p) => p.method !== 'credit')
+        .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+      amountPaid = Math.min(safeTotal, cashPaid);
+      amountDue = Math.max(0, safeTotal - amountPaid);
+    }
+
+    if (amountDue > 0 && !payload.customer && !sale.customer) {
+      return res.status(400).json({ success: false, message: 'Customer is required for debtor / credit sales.' });
+    }
+
+    sale.customer = payload.customer !== undefined ? payload.customer || undefined : sale.customer;
+    sale.customerName = payload.customerName ?? sale.customerName;
+    sale.customerPhone = payload.customerPhone ?? sale.customerPhone;
+    sale.customerAddress = payload.customerAddress ?? sale.customerAddress;
+    sale.electrician = payload.electrician !== undefined ? payload.electrician : sale.electrician;
+    sale.commissionRate = payload.commissionRate ?? sale.commissionRate;
+    sale.commissionTotal = payload.commissionTotal ?? sale.commissionTotal;
+    sale.items = payload.items || sale.items;
+    sale.subtotal = payload.subtotal ?? sale.subtotal;
+    sale.discount = payload.discount ?? sale.discount;
+    sale.discountType = payload.discountType || sale.discountType;
+    sale.vatAmount = payload.vatAmount ?? sale.vatAmount;
+    sale.total = payload.total ?? sale.total;
+    sale.payments = payments;
+    sale.amountPaid = amountPaid;
+    sale.amountDue = amountDue;
+    sale.notes = payload.notes ?? sale.notes;
+    sale.terms = payload.terms ?? sale.terms;
+    if (payload.warehouse) sale.warehouse = payload.warehouse;
+    if (payload.status) sale.status = payload.status;
+    await sale.save();
+
+    if (saleWasPosted(sale)) {
+      await processSale(sale, req.user._id, req);
+    }
+
+    const nextCustomerId = saleId(sale.customer);
+    const ids = [...new Set([previousCustomerId, nextCustomerId].filter(Boolean))];
+    for (const id of ids) {
+      await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, id);
+    }
+
+    const populated = await Sale.findById(sale._id)
+      .populate('customer', 'name phone address')
+      .populate('createdBy', 'name');
+    res.json({ success: true, data: populated });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteSale = async (req, res) => {
+  try {
+    const sale = await Sale.findById(req.params.id);
+    if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
+    if (sale.status === 'cancelled') {
+      return res.status(400).json({ success: false, message: 'Sale is already cancelled.' });
+    }
+
+    const returnsCount = await saleReturnCount(sale._id);
+    if (returnsCount > 0 || ['returned', 'partial_return'].includes(sale.status)) {
+      return res.status(400).json({ success: false, message: 'This sale has returns. Reverse the returns before deleting.' });
+    }
+
+    const previousCustomerId = saleId(sale.customer);
+    if (saleWasPosted(sale)) {
+      await reverseSale(sale, req.user._id, req);
+    }
+
+    await Sale.deleteOne({ _id: sale._id });
+
+    if (previousCustomerId) {
+      await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, previousCustomerId);
+    }
+
+    res.json({ success: true, message: 'Sale deleted.' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

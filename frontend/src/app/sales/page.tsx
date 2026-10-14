@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
-import { saleAPI } from "@/lib/api";
+import { saleAPI, productAPI, customerAPI, ALL_RECORDS } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
-import { FileText, Printer, RotateCcw, RefreshCw, Search } from "lucide-react";
+import { FileText, Printer, RotateCcw, RefreshCw, Search, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
+import Modal from "@/components/ui/Modal";
+import SaleEditForm, { SaleEditPayload, SaleForEdit } from "@/components/sales/SaleEditForm";
 
 interface Sale {
   _id: string;
@@ -32,6 +34,10 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ListFilter>("all");
   const [search, setSearch] = useState("");
+  const [editingSale, setEditingSale] = useState<SaleForEdit | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [products, setProducts] = useState<Array<{ _id: string; name: string; sellingPrice: number }>>([]);
+  const [customers, setCustomers] = useState<Array<{ _id: string; name: string; phone?: string }>>([]);
   const debouncedSearch = useDebouncedValue(search, 250);
 
   const loadSales = useCallback(async () => {
@@ -55,6 +61,51 @@ export default function SalesPage() {
   useEffect(() => {
     loadSales();
   }, [loadSales]);
+
+  useEffect(() => {
+    productAPI.getAll().then((r) => setProducts(r.data.data || []));
+    customerAPI.getAll({ limit: ALL_RECORDS }).then((r) => setCustomers(r.data.data || []));
+  }, []);
+
+  const canMutate = (sale: Sale) => sale.status !== "cancelled";
+
+  const openEdit = async (saleId: string) => {
+    try {
+      const res = await saleAPI.getById(saleId);
+      setEditingSale(res.data.data);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      toast.error(e.response?.data?.message || "Failed to load sale");
+    }
+  };
+
+  const handleUpdate = async (payload: SaleEditPayload) => {
+    if (!editingSale) return;
+    setSaving(true);
+    try {
+      await saleAPI.update(editingSale._id, payload);
+      toast.success("Sale updated");
+      setEditingSale(null);
+      loadSales();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      toast.error(e.response?.data?.message || "Failed to update sale");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (sale: Sale) => {
+    if (!window.confirm(`Delete ${sale.invoiceNumber}? Stock and customer balance will be reversed.`)) return;
+    try {
+      await saleAPI.remove(sale._id);
+      toast.success("Sale deleted");
+      loadSales();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { message?: string } } };
+      toast.error(e.response?.data?.message || "Failed to delete sale");
+    }
+  };
 
   return (
     <DashboardLayout>
@@ -156,15 +207,34 @@ export default function SalesPage() {
                     <span className="badge capitalize">{(sale.status || "").replace("_", " ")}</span>
                   </td>
                   <td className="table-cell text-gray-500">{formatDateTime(sale.createdAt)}</td>
-                  <td className="table-cell">
-                    <div className="flex items-center gap-2">
-                      <Link href={`/sales/${sale._id}/print`} className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-800 text-sm">
-                        <Printer className="w-4 h-4" /> Print
+                  <td className="table-cell text-right">
+                    <div className="inline-flex items-center justify-end gap-1 flex-wrap">
+                      <Link
+                        href={`/sales/${sale._id}/print`}
+                        className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Print
                       </Link>
-                      {sale.status !== "returned" && sale.status !== "cancelled" && (
-                        <Link href="/sales/returns" className="inline-flex items-center gap-1 text-brand-500 hover:text-brand-800 text-sm">
-                          <RotateCcw className="w-3.5 h-3.5" /> Return
-                        </Link>
+                      {canMutate(sale) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => openEdit(sale._id)}
+                            className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1"
+                          >
+                            <Pencil className="w-3.5 h-3.5" /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(sale)}
+                            className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Delete
+                          </button>
+                          <Link href="/sales/returns" className="btn-secondary text-xs py-1 px-2 inline-flex items-center gap-1">
+                            <RotateCcw className="w-3.5 h-3.5" /> Return
+                          </Link>
+                        </>
                       )}
                     </div>
                   </td>
@@ -175,6 +245,20 @@ export default function SalesPage() {
           </tbody>
         </table>
       </div>
+
+      <Modal open={!!editingSale} onClose={() => setEditingSale(null)} size="3xl" hideHeader>
+        {editingSale && (
+          <SaleEditForm
+            key={editingSale._id}
+            sale={editingSale}
+            products={products}
+            customers={customers}
+            saving={saving}
+            onSubmit={handleUpdate}
+            onCancel={() => setEditingSale(null)}
+          />
+        )}
+      </Modal>
     </DashboardLayout>
   );
 }
