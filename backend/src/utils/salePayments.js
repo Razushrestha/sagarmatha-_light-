@@ -36,21 +36,31 @@ function normalizeSalePaymentFields(total, payments = [], overrides = {}) {
   return { amountPaid, amountDue };
 }
 
-async function sumCustomerPayments(CustomerPayment, customerId) {
-  const [agg] = await CustomerPayment.aggregate([
+async function sumCustomerPaymentBuckets(CustomerPayment, customerId) {
+  const rows = await CustomerPayment.aggregate([
     { $match: { customer: customerId } },
-    {
-      $group: {
-        _id: null,
-        total: {
-          $sum: {
-            $cond: [{ $eq: ['$type', 'refund'] }, { $multiply: ['$amount', -1] }, '$amount'],
-          },
-        },
-      },
-    },
+    { $group: { _id: '$type', total: { $sum: '$amount' } } },
   ]);
-  return agg?.total || 0;
+  const buckets = { payment: 0, refund: 0, store_credit: 0 };
+  for (const row of rows) {
+    if (row._id && buckets[row._id] != null) buckets[row._id] = row.total || 0;
+  }
+  return buckets;
+}
+
+async function sumCustomerPayments(CustomerPayment, customerId) {
+  const buckets = await sumCustomerPaymentBuckets(CustomerPayment, customerId);
+  return (buckets.payment || 0) - (buckets.refund || 0);
+}
+
+function creditFromBuckets(openingCredit, cashOnInvoices, buckets) {
+  const payments = buckets.payment || 0;
+  const storeCredits = buckets.store_credit || 0;
+  const refunds = buckets.refund || 0;
+  const storeCreditLeft = Math.max(0, storeCredits - refunds);
+  const refundsLeft = Math.max(0, refunds - storeCredits);
+  const invoiceOverpay = Math.max(0, payments - refundsLeft - cashOnInvoices);
+  return openingCredit + invoiceOverpay + storeCreditLeft;
 }
 
 async function repairCreditSales(Sale) {
@@ -136,8 +146,8 @@ async function reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, cus
   const openingCredit = Math.max(0, customer.openingCredit ?? Math.max(0, -(customer.openingBalance || 0)));
   const targetDebt = openingDebt + totalDue;
   const cashOnInvoices = Math.max(0, totalPurchases - totalDue);
-  const totalPayments = await sumCustomerPayments(CustomerPayment, customer._id);
-  const targetCredit = openingCredit + Math.max(0, totalPayments - cashOnInvoices);
+  const buckets = await sumCustomerPaymentBuckets(CustomerPayment, customer._id);
+  const targetCredit = creditFromBuckets(openingCredit, cashOnInvoices, buckets);
   const targetPaid = cashOnInvoices;
 
   customer.totalPurchases = totalPurchases;
@@ -177,6 +187,72 @@ async function reconcileAllDebtors(Customer, Sale, CustomerPayment) {
   return reconcileAllCustomers(Customer, Sale, CustomerPayment);
 }
 
+async function recordStoreCredit(CustomerPayment, {
+  customerId,
+  saleId,
+  amount,
+  returnNumber,
+  userId,
+  session,
+}) {
+  const credit = Math.round((Number(amount) || 0) * 100) / 100;
+  if (!customerId || credit <= 0.009) return null;
+  const existing = await CustomerPayment.findOne({
+    customer: customerId,
+    type: 'store_credit',
+    reference: returnNumber,
+  });
+  if (existing) return existing;
+  const payload = {
+    customer: customerId,
+    sale: saleId || undefined,
+    amount: credit,
+    type: 'store_credit',
+    method: 'credit_note',
+    reference: returnNumber,
+    notes: `Store credit from return ${returnNumber}`,
+    createdBy: userId,
+  };
+  if (session) {
+    const docs = await CustomerPayment.create([payload], { session });
+    return docs[0];
+  }
+  return CustomerPayment.create(payload);
+}
+
+async function ensureSaleReturnStoreCredits(CustomerPayment, SaleReturn, Sale) {
+  const returns = await SaleReturn.find({
+    refundMethod: 'credit_note',
+    customer: { $ne: null },
+  }).select('returnNumber customer originalSale total createdBy').sort({ createdAt: 1 }).lean();
+
+  const bySale = new Map();
+  for (const row of returns) {
+    const key = String(row.originalSale || row._id);
+    if (!bySale.has(key)) bySale.set(key, []);
+    bySale.get(key).push(row);
+  }
+
+  for (const [saleId, rows] of bySale.entries()) {
+    const sale = Sale ? await Sale.findById(saleId).select('refundedAmount') : null;
+    let pool = Number(sale?.refundedAmount);
+    if (!Number.isFinite(pool) || pool <= 0) {
+      pool = rows.reduce((sum, row) => sum + (Number(row.total) || 0), 0);
+    }
+    for (const row of rows) {
+      const amount = Math.min(Number(row.total) || 0, Math.max(0, pool));
+      pool -= amount;
+      await recordStoreCredit(CustomerPayment, {
+        customerId: row.customer,
+        saleId: row.originalSale,
+        amount,
+        returnNumber: row.returnNumber,
+        userId: row.createdBy,
+      });
+    }
+  }
+}
+
 module.exports = {
   normalizeSalePaymentFields,
   hasCreditPayment,
@@ -185,4 +261,6 @@ module.exports = {
   reconcileAllCustomers,
   reconcileAllDebtors,
   sumCustomerPayments,
+  recordStoreCredit,
+  ensureSaleReturnStoreCredits,
 };

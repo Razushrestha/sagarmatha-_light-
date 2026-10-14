@@ -82,14 +82,14 @@ export default function DashboardPage() {
       <PageHeader title="Dashboard" />
 
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="card p-5 h-28 animate-pulse bg-brand-50" />
           ))}
         </div>
       ) : data && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 mb-6">
             <StatsCard title="Today's Sales" value={formatCurrency(data.todaySales)} subtitle={`${data.todayCount} transactions`} icon={DollarSign} />
             <StatsCard title="Monthly Sales" value={formatCurrency(data.monthSales)} subtitle={`${data.monthCount} transactions`} icon={TrendingUp} />
             <StatsCard title="Total Products" value={String(data.totalProducts)} subtitle={`${data.lowStockProducts} low stock`} icon={Package} />

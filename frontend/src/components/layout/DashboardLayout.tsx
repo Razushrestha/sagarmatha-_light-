@@ -1,24 +1,39 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { COMPANY } from "@/lib/company";
 import { cn } from "@/lib/utils";
 import { prefetchAppRoutes } from "@/lib/appRoutes";
+import { useNavShortcuts } from "@/lib/navShortcuts";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useNavShortcuts(Boolean(user));
 
   useEffect(() => {
     if (!loading && !user) {
       router.push("/login");
     }
   }, [user, loading, router]);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [mobileOpen]);
 
   useEffect(() => {
     if (!user) return;
@@ -45,19 +60,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!user) return null;
 
   return (
-    <div className="page-shell min-h-screen">
+    <div className="page-shell min-h-screen min-h-[100dvh] overflow-x-hidden">
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          className="fixed inset-0 z-40 bg-black/45 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
       <Sidebar
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        mobileOpen={mobileOpen}
+        onMobileClose={() => setMobileOpen(false)}
       />
       <div
         className={cn(
-          "min-h-screen transition-all duration-300 min-w-0",
-          sidebarCollapsed ? "ml-[72px]" : "ml-[260px]"
+          "min-h-screen min-h-[100dvh] transition-all duration-300 min-w-0",
+          sidebarCollapsed ? "lg:ml-[72px]" : "lg:ml-[260px]"
         )}
       >
-        <Header />
-        <main className="content-main w-full max-w-full">{children}</main>
+        <Header onMenuClick={() => setMobileOpen(true)} />
+        <main className="content-main w-full max-w-full overflow-x-hidden">{children}</main>
       </div>
     </div>
   );

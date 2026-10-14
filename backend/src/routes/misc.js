@@ -8,8 +8,12 @@ router.use(protect);
 
 router.get('/categories', miscController.getCategories);
 router.post('/categories', authorize('product:create'), miscController.createCategory);
+router.put('/categories/:id', authorize('product:edit', 'product:create'), miscController.updateCategory);
+router.delete('/categories/:id', authorize('product:delete', 'product:edit', 'product:create'), miscController.deleteCategory);
 router.get('/brands', miscController.getBrands);
 router.post('/brands', authorize('product:create'), miscController.createBrand);
+router.put('/brands/:id', authorize('product:edit', 'product:create'), miscController.updateBrand);
+router.delete('/brands/:id', authorize('product:delete', 'product:edit', 'product:create'), miscController.deleteBrand);
 router.get('/units', miscController.getUnits);
 router.get('/warehouses', miscController.getWarehouses);
 router.get('/stock-movements', authorize('product:read', 'stock:adjust', 'pos:access'), miscController.getStockMovements);

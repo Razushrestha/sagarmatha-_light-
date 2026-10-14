@@ -2,9 +2,11 @@ const Customer = require('../models/Customer');
 const CustomerPayment = require('../models/CustomerPayment');
 const Sale = require('../models/Sale');
 const { createAuditLog } = require('../middleware/audit');
+const SaleReturn = require('../models/SaleReturn');
 const {
   reconcileCustomerOutstanding,
   normalizeSalePaymentFields,
+  ensureSaleReturnStoreCredits,
 } = require('../utils/salePayments');
 
 function mapDebtor(customer) {
@@ -166,6 +168,15 @@ exports.getDebtors = async (req, res) => {
 
 exports.getCreditCustomers = async (req, res) => {
   try {
+    await ensureSaleReturnStoreCredits(CustomerPayment, SaleReturn, Sale);
+    const withReturns = await SaleReturn.distinct('customer', {
+      refundMethod: 'credit_note',
+      customer: { $ne: null },
+    });
+    for (const id of withReturns) {
+      await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, id);
+    }
+
     const customers = await Customer.find({ isActive: true, creditBalance: { $gt: 0 } })
       .select('name phone company customerType outstanding creditBalance creditLimit totalPurchases totalPaid')
       .sort({ creditBalance: -1 })

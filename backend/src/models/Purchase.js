@@ -17,7 +17,7 @@ const purchaseSchema = new mongoose.Schema({
   type: { type: String, enum: ['order', 'grn', 'invoice'], default: 'invoice' },
   status: {
     type: String,
-    enum: ['draft', 'ordered', 'partial', 'received', 'completed', 'cancelled', 'returned'],
+    enum: ['draft', 'ordered', 'partial', 'received', 'completed', 'cancelled', 'returned', 'partial_return'],
     default: 'completed',
   },
   supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },

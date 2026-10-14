@@ -25,6 +25,7 @@ interface Product {
   currentStock: number;
   images?: string[];
   category?: { _id: string; name: string } | string;
+  brand?: { _id: string; name: string } | string;
   commissionPercent?: number;
 }
 
@@ -114,6 +115,12 @@ function getPrice(product: Product, level: PriceLevel): number {
   return product.sellingPrice;
 }
 
+function productBrandName(product?: { brand?: { name?: string } | string }): string {
+  if (!product?.brand) return "";
+  if (typeof product.brand === "string") return product.brand;
+  return product.brand.name || "";
+}
+
 function stockStatus(stock: number) {
   if (stock <= 0) return { label: "Out of stock", className: "bg-brand-200 text-brand-600" };
   if (stock <= 5) return { label: `${stock} left`, className: "bg-amber-100 text-amber-800" };
@@ -170,11 +177,13 @@ export default function POSPage() {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [brands, setBrands] = useState<Category[]>([]);
   const [warehouses, setWarehouses] = useState<Array<{ _id: string; name: string; isDefault?: boolean }>>([]);
   const [warehouseId, setWarehouseId] = useState("");
   const [electricians, setElectricians] = useState<ElectricianOption[]>([]);
   const [electricianId, setElectricianId] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedBrand, setSelectedBrand] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [search, setSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -243,6 +252,7 @@ export default function POSPage() {
     loadProducts();
     loadHeld();
     miscAPI.getCategories().then((r) => setCategories(r.data.data));
+    miscAPI.getBrands().then((r) => setBrands(r.data.data || [])).catch(() => {});
     miscAPI.getWarehouses().then((r) => {
       const list = r.data.data || [];
       setWarehouses(list);
@@ -264,21 +274,33 @@ export default function POSPage() {
     return () => clearTimeout(timer);
   }, [customerSearch, customerPanel]);
 
-  const loadProducts = async (q?: string, categoryId?: string) => {
+  const loadProducts = async (q?: string, categoryId?: string, brandId?: string) => {
     const params: Record<string, string> = {};
     if (q?.trim()) params.search = q.trim();
     const cat = categoryId ?? selectedCategory;
+    const br = brandId ?? selectedBrand;
     if (cat) params.category = cat;
+    if (br) params.brand = br;
     const res = await productAPI.getAll(params);
     setProducts(res.data.data);
   };
 
-  const handleCategoryChange = (categoryId: string) => {
-    setSelectedCategory(categoryId);
+  const applyFilters = (categoryId: string, brandId: string) => {
     const params: Record<string, string> = {};
     if (search.trim()) params.search = search.trim();
     if (categoryId) params.category = categoryId;
+    if (brandId) params.brand = brandId;
     productAPI.getAll(params).then((r) => setProducts(r.data.data));
+  };
+
+  const handleCategoryChange = (categoryId: string) => {
+    setSelectedCategory(categoryId);
+    applyFilters(categoryId, selectedBrand);
+  };
+
+  const handleBrandChange = (brandId: string) => {
+    setSelectedBrand(brandId);
+    applyFilters(selectedCategory, brandId);
   };
 
   const loadHeld = () => saleAPI.getHeld().then((r) => setHeldSales(r.data.data));
@@ -602,8 +624,8 @@ export default function POSPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col h-[calc(100vh-120px)]">
-        <div className="flex gap-3 mb-4 items-center">
+      <div className="flex flex-col h-[calc(100dvh-7.5rem)] sm:h-[calc(100vh-120px)]">
+        <div className="flex flex-wrap gap-2 sm:gap-3 mb-3 sm:mb-4 items-center">
           <div className="flex rounded-lg border border-brand-200 overflow-hidden shrink-0">
             {PRICE_LEVELS.map((pl) => (
               <button
@@ -634,10 +656,10 @@ export default function POSPage() {
               const value = e.target.value;
               setSearch(value);
               clearTimeout(productSearchTimer.current);
-              productSearchTimer.current = setTimeout(() => loadProducts(value, selectedCategory), 200);
+              productSearchTimer.current = setTimeout(() => loadProducts(value, selectedCategory, selectedBrand), 200);
             }}
               onKeyDown={(e) => e.key === "Enter" && handleBarcodeScan(search)}
-              placeholder="Search products or scan barcode..." className="input-field pl-10" />
+              placeholder="Search products, brand, or scan barcode..." className="input-field pl-10" />
           </div>
           <button onClick={() => setShowHeld(true)} className="btn-secondary flex items-center gap-2 shrink-0">
             <RotateCcw className="w-4 h-4" /> Held ({heldSales.length})
@@ -663,7 +685,7 @@ export default function POSPage() {
           }} />
         </div>
 
-        <div className="flex gap-2 mb-4 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
+        <div className="flex gap-2 mb-2 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
           <button
             type="button"
             onClick={() => handleCategoryChange("")}
@@ -689,6 +711,35 @@ export default function POSPage() {
               )}
             >
               {cat.name}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 mb-4 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
+          <button
+            type="button"
+            onClick={() => handleBrandChange("")}
+            className={cn(
+              "px-3.5 py-1.5 text-xs font-medium rounded-full border shrink-0 transition-all",
+              !selectedBrand
+                ? "bg-brand-900 text-white border-brand-900 shadow-sm"
+                : "bg-white text-brand-700 border-brand-200 hover:bg-brand-50 hover:border-brand-300"
+            )}
+          >
+            All Brands
+          </button>
+          {brands.map((brand) => (
+            <button
+              key={brand._id}
+              type="button"
+              onClick={() => handleBrandChange(brand._id)}
+              className={cn(
+                "px-3.5 py-1.5 text-xs font-medium rounded-full border shrink-0 transition-all whitespace-nowrap",
+                selectedBrand === brand._id
+                  ? "bg-brand-900 text-white border-brand-900 shadow-sm"
+                  : "bg-white text-brand-700 border-brand-200 hover:bg-brand-50 hover:border-brand-300"
+              )}
+            >
+              {brand.name}
             </button>
           ))}
         </div>
@@ -733,7 +784,9 @@ export default function POSPage() {
                     <div className="p-3 flex flex-col flex-1 gap-2">
                       <div className="min-h-[2.75rem]">
                         <h3 className="text-sm font-semibold text-brand-900 line-clamp-2 leading-snug">{p.name}</h3>
-                        <p className="text-[11px] text-brand-400 mt-0.5 font-mono">{p.sku}</p>
+                        <p className="text-[11px] text-brand-500 mt-0.5">
+                          {productBrandName(p) || "No brand"}
+                        </p>
                       </div>
 
                       <div className="mt-auto flex items-end justify-between gap-2">
@@ -838,6 +891,9 @@ export default function POSPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-brand-900 leading-snug">{item.product.name}</p>
+                        {productBrandName(item.product) && (
+                          <p className="text-[11px] text-brand-500 mt-0.5">{productBrandName(item.product)}</p>
+                        )}
                         <p className="text-xs text-brand-500 mt-0.5">{formatCurrency(item.unitPrice)} each</p>
                         {item.discount > 0 && (
                           <p className="text-[11px] text-brand-600 mt-0.5">

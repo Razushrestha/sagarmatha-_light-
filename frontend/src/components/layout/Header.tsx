@@ -2,12 +2,12 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Bell, LogOut, User } from "lucide-react";
+import { Search, Bell, LogOut, User, Menu } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { miscAPI } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 
-export default function Header() {
+export default function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
@@ -43,22 +43,30 @@ export default function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-brand-200 px-6 py-3">
-      <div className="flex items-center justify-between gap-4">
-        <div className="relative flex-1 max-w-xl">
+    <header className="sticky top-0 z-30 bg-white border-b border-brand-200 px-3 sm:px-6 py-2.5 sm:py-3 pt-[max(0.625rem,env(safe-area-inset-top))]">
+      <div className="flex items-center justify-between gap-2 sm:gap-4">
+        <button
+          type="button"
+          onClick={onMenuClick}
+          className="lg:hidden shrink-0 p-2.5 rounded-lg border border-brand-200 bg-white text-brand-800"
+          aria-label="Open menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+        <div className="relative flex-1 min-w-0 max-w-xl">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-400" strokeWidth={1.75} />
           <input
             type="text"
-            placeholder="Search products, customers, invoices..."
+            placeholder="Search..."
             value={searchQuery}
             onChange={(e) => handleSearch(e.target.value)}
             onFocus={() => searchResults && setShowResults(true)}
             onBlur={() => setTimeout(() => setShowResults(false), 200)}
-            className="w-full pl-10 pr-4 py-2.5 bg-brand-50 border border-brand-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-900/10 focus:border-brand-400 transition-all"
+            className="w-full pl-10 pr-3 sm:pr-4 py-2.5 bg-brand-50 border border-brand-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-900/10 focus:border-brand-400 transition-all"
           />
 
           {showResults && searchResults && (
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-card-hover border border-brand-200 max-h-80 overflow-y-auto">
+            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-lg shadow-card-hover border border-brand-200 max-h-80 overflow-y-auto z-40">
               {searchResults.products.length > 0 && (
                 <div className="p-2">
                   <p className="text-xs font-semibold text-brand-500 px-2 py-1 uppercase tracking-wide">Products</p>
@@ -109,7 +117,7 @@ export default function Header() {
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <button
             onClick={() => router.push("/notifications")}
             className="relative p-2.5 rounded-lg hover:bg-brand-50 transition-colors border border-transparent hover:border-brand-200"

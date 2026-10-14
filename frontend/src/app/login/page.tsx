@@ -61,7 +61,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-8 bg-brand-50">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-8 bg-brand-50">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center gap-3 mb-8">
             <div className="w-12 h-12 rounded-lg bg-brand-900 flex items-center justify-center">
@@ -73,7 +73,7 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <div className="card p-8">
+          <div className="card p-5 sm:p-8">
             <h2 className="text-2xl font-semibold text-brand-900 mb-1">Welcome back</h2>
             <p className="text-sm text-brand-500 mb-8">Sign in to your account to continue</p>
 

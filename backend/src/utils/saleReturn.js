@@ -116,15 +116,17 @@ function applyRefundToSale(sale, returnTotal, refundMethod) {
   const netTotal = saleNetTotal(sale);
   let cashRefund = 0;
   let dueReduce = 0;
+  let storeCredit = 0;
 
   if (refundMethod === 'credit_note') {
     dueReduce = Math.min(Number(sale.amountDue) || 0, refund);
     sale.amountDue = round2(Math.max(0, (Number(sale.amountDue) || 0) - dueReduce));
     const leftover = round2(refund - dueReduce);
     if (leftover > 0) {
-      cashRefund = Math.min(Number(sale.amountPaid) || 0, leftover);
-      sale.amountPaid = round2(Math.max(0, (Number(sale.amountPaid) || 0) - cashRefund));
-      sale.refundedAmount = round2((Number(sale.refundedAmount) || 0) + cashRefund);
+      storeCredit = leftover;
+      const paidReduce = Math.min(Number(sale.amountPaid) || 0, leftover);
+      sale.amountPaid = round2(Math.max(0, (Number(sale.amountPaid) || 0) - paidReduce));
+      sale.refundedAmount = round2((Number(sale.refundedAmount) || 0) + paidReduce);
     }
   } else {
     cashRefund = Math.min(Number(sale.amountPaid) || 0, refund);
@@ -144,7 +146,7 @@ function applyRefundToSale(sale, returnTotal, refundMethod) {
     sale.amountDue = round2(Math.max(0, netTotal - sale.amountPaid));
   }
 
-  return { cashRefund, dueReduce, netTotal };
+  return { cashRefund, dueReduce, storeCredit, netTotal };
 }
 
 module.exports = {

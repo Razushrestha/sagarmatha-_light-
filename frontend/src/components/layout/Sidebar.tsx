@@ -11,6 +11,7 @@ import { COMPANY } from "@/lib/company";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useState } from "react";
+import { NAV_SHORTCUT_HINT } from "@/lib/navShortcuts";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "reports:view" },
@@ -55,6 +56,17 @@ const navigation = [
 
 const iconClass = "w-5 h-5 flex-shrink-0 text-gray-400";
 
+function ShortcutHint({ href }: { href?: string }) {
+  if (!href) return null;
+  const hint = NAV_SHORTCUT_HINT[href];
+  if (!hint) return null;
+  return (
+    <span className="ml-auto text-[10px] leading-none text-gray-500 whitespace-nowrap pl-1" title={hint}>
+      {hint}
+    </span>
+  );
+}
+
 function isActiveHref(pathname: string, href: string, siblings: Array<{ href: string }> = []) {
   if (pathname === href) return true;
   if (!pathname.startsWith(`${href}/`)) return false;
@@ -75,9 +87,11 @@ function groupForPath(pathname: string) {
 interface SidebarProps {
   collapsed: boolean;
   onToggleCollapse: () => void;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, hasPermission } = useAuth();
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -95,21 +109,25 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
     (item) => !item.permission || hasPermission(item.permission)
   );
 
+  const hideLabels = collapsed && !mobileOpen;
+
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 h-screen bg-sidebar text-white flex flex-col transition-all duration-300 z-40 border-r border-brand-800",
-        collapsed ? "w-[72px]" : "w-[260px]"
+        "fixed left-0 top-0 h-[100dvh] bg-sidebar text-white flex flex-col transition-transform duration-300 z-50 border-r border-brand-800 w-[min(260px,86vw)]",
+        mobileOpen ? "translate-x-0" : "-translate-x-full",
+        "lg:translate-x-0 lg:z-40",
+        collapsed ? "lg:w-[72px]" : "lg:w-[260px]"
       )}
     >
       <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10">
         <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
           <span className="text-brand-900 font-bold text-sm">{COMPANY.monogram}</span>
         </div>
-        {!collapsed && (
-          <div className="overflow-hidden">
-            <h1 className="font-semibold text-sm leading-tight">{COMPANY.shortName}</h1>
-            <p className="text-[10px] text-gray-400">{COMPANY.tagline}</p>
+        {!hideLabels && (
+          <div className="overflow-hidden min-w-0">
+            <h1 className="font-semibold text-sm leading-tight truncate">{COMPANY.shortName}</h1>
+            <p className="text-[10px] text-gray-400 truncate">{COMPANY.tagline}</p>
           </div>
         )}
       </div>
@@ -123,7 +141,7 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
             return (
               <div key={item.name}>
                 <button
-                  onClick={() => !collapsed && toggleGroup(item.name)}
+                  onClick={() => !hideLabels && toggleGroup(item.name)}
                   className={cn(
                     "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
                     isChildActive
@@ -132,27 +150,30 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
                   )}
                 >
                   <item.icon className={iconClass} />
-                  {!collapsed && (
+                  {!hideLabels && (
                     <>
                       <span className="flex-1 text-left">{item.name}</span>
-                      <ChevronRight className={cn("w-4 h-4 text-gray-500 transition-transform", isExpanded && "rotate-90")} />
+                      <ShortcutHint href={item.children[0]?.href} />
+                      <ChevronRight className={cn("w-4 h-4 text-gray-500 transition-transform shrink-0", isExpanded && "rotate-90")} />
                     </>
                   )}
                 </button>
-                {!collapsed && isExpanded && (
+                {!hideLabels && isExpanded && (
                   <div className="ml-4 mt-1 space-y-0.5 border-l border-gray-700 pl-3">
                     {item.children.map((child) => (
                       <Link
                         key={child.href}
                         href={child.href}
+                        onClick={onMobileClose}
                         className={cn(
-                          "block px-3 py-2 rounded-lg text-sm transition-colors",
+                          "flex items-center px-3 py-2 rounded-lg text-sm transition-colors",
                           isActiveHref(pathname, child.href, item.children)
                             ? "bg-sidebar-active text-white font-medium"
                             : "text-gray-400 hover:text-white hover:bg-sidebar-hover"
                         )}
                       >
-                        {child.name}
+                        <span className="flex-1">{child.name}</span>
+                        <ShortcutHint href={child.href} />
                       </Link>
                     ))}
                   </div>
@@ -166,6 +187,7 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
             <Link
               key={item.href}
               href={item.href!}
+              onClick={onMobileClose}
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
                 isActive
@@ -174,14 +196,19 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
               )}
             >
               <item.icon className={cn(iconClass, isActive && "text-white")} />
-              {!collapsed && <span>{item.name}</span>}
+              {!hideLabels && (
+                <>
+                  <span className="flex-1">{item.name}</span>
+                  <ShortcutHint href={item.href} />
+                </>
+              )}
             </Link>
           );
         })}
       </nav>
 
       <div className="p-3 border-t border-white/10">
-        {!collapsed && user && (
+        {!hideLabels && user && (
           <div className="px-3 py-2 mb-2">
             <p className="text-sm font-medium truncate">{user.name}</p>
             <p className="text-xs text-gray-400 capitalize">{user.role.replace("_", " ")}</p>
@@ -189,10 +216,16 @@ export default function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
         )}
         <button
           onClick={onToggleCollapse}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-sidebar-hover hover:text-white transition-colors text-sm"
+          className="hidden lg:flex w-full items-center justify-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-sidebar-hover hover:text-white transition-colors text-sm"
         >
           {collapsed ? <ChevronRight className="w-4 h-4" strokeWidth={1.75} /> : <ChevronLeft className="w-4 h-4" strokeWidth={1.75} />}
           {!collapsed && <span>Collapse</span>}
+        </button>
+        <button
+          onClick={onMobileClose}
+          className="lg:hidden w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:bg-sidebar-hover hover:text-white transition-colors text-sm"
+        >
+          Close menu
         </button>
       </div>
     </aside>

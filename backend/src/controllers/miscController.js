@@ -16,6 +16,39 @@ exports.createCategory = async (req, res) => {
   res.status(201).json({ success: true, data: category });
 };
 
+exports.updateCategory = async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ success: false, message: 'Category name is required.' });
+    const category = await Category.findByIdAndUpdate(
+      req.params.id,
+      { name, description: req.body.description },
+      { new: true, runValidators: true }
+    );
+    if (!category) return res.status(404).json({ success: false, message: 'Category not found.' });
+    res.json({ success: true, data: category });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteCategory = async (req, res) => {
+  try {
+    const inUse = await Product.countDocuments({ category: req.params.id, isActive: true });
+    if (inUse > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete: ${inUse} product(s) still use this category.`,
+      });
+    }
+    const category = await Category.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+    if (!category) return res.status(404).json({ success: false, message: 'Category not found.' });
+    res.json({ success: true, message: 'Category deleted.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.getBrands = async (req, res) => {
   const brands = await Brand.find({ isActive: true }).lean();
   res.json({ success: true, data: brands });
@@ -24,6 +57,42 @@ exports.getBrands = async (req, res) => {
 exports.createBrand = async (req, res) => {
   const brand = await Brand.create(req.body);
   res.status(201).json({ success: true, data: brand });
+};
+
+exports.updateBrand = async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ success: false, message: 'Brand name is required.' });
+    const brand = await Brand.findByIdAndUpdate(
+      req.params.id,
+      { name, description: req.body.description },
+      { new: true, runValidators: true }
+    );
+    if (!brand) return res.status(404).json({ success: false, message: 'Brand not found.' });
+    res.json({ success: true, data: brand });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: 'A brand with this name already exists.' });
+    }
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteBrand = async (req, res) => {
+  try {
+    const inUse = await Product.countDocuments({ brand: req.params.id, isActive: true });
+    if (inUse > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete: ${inUse} product(s) still use this brand.`,
+      });
+    }
+    const brand = await Brand.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+    if (!brand) return res.status(404).json({ success: false, message: 'Brand not found.' });
+    res.json({ success: true, message: 'Brand deleted.' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
 
 exports.getUnits = async (req, res) => {

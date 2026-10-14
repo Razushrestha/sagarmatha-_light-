@@ -1,4 +1,5 @@
 const Product = require('../models/Product');
+const Brand = require('../models/Brand');
 const { createAuditLog } = require('../middleware/audit');
 const {
   getExportRows,
@@ -14,10 +15,12 @@ exports.getProducts = async (req, res) => {
     const query = { isActive: true };
 
     if (search) {
+      const matchingBrands = await Brand.find({ name: { $regex: search, $options: 'i' } }).select('_id').lean();
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { sku: { $regex: search, $options: 'i' } },
         { barcode: { $regex: search, $options: 'i' } },
+        { brand: { $in: matchingBrands.map((b) => b._id) } },
       ];
     }
     if (category) query.category = category;

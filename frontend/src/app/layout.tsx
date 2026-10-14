@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "@/context/AuthContext";
@@ -17,6 +17,14 @@ export const metadata: Metadata = {
   description: `Complete ERP system for ${COMPANY.name} - Nepal IRD VAT Compliant`,
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+  themeColor: "#111827",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -28,8 +36,9 @@ export default function RootLayout({
         <AuthProvider>
           {children}
           <Toaster
-            position="top-right"
+            position="top-center"
             toastOptions={{
+              className: "max-w-[calc(100vw-1.5rem)]",
               style: {
                 background: "#111827",
                 color: "#fff",

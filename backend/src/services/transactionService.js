@@ -1,6 +1,7 @@
 const Product = require('../models/Product');
 const { StockMovement } = require('../models/Warehouse');
 const Customer = require('../models/Customer');
+const Sale = require('../models/Sale');
 const Supplier = require('../models/Supplier');
 const PurchaseReturn = require('../models/PurchaseReturn');
 const Notification = require('../models/Notification');
@@ -8,7 +9,9 @@ const { createAuditLog } = require('../middleware/audit');
 const { postSaleJournal, postSaleReturnJournal, postPurchaseJournal } = require('./journalService');
 const { withOptionalTransaction, sessionQuery, sessionOpts } = require('../utils/mongoTransaction');
 const { resolveWarehouseId } = require('../utils/warehouse');
+const CustomerPayment = require('../models/CustomerPayment');
 const { applyAllocationsToSale, applyRefundToSale } = require('../utils/saleReturn');
+const { recordStoreCredit, reconcileCustomerOutstanding } = require('../utils/salePayments');
 
 const processSale = async (sale, userId, req) =>
   withOptionalTransaction(async (session) => {
@@ -162,6 +165,7 @@ const processSaleReturn = async (saleReturn, originalSale, userId, req, extra = 
     const warehouseId = await resolveWarehouseId(saleReturn.warehouse || parts[0]?.sale?.warehouse);
     let cashRefund = 0;
     let dueReduce = 0;
+    let storeCredit = 0;
 
     for (const item of saleReturn.items) {
       const product = await sessionQuery(Product.findById(item.product), session);
@@ -191,6 +195,7 @@ const processSaleReturn = async (saleReturn, originalSale, userId, req, extra = 
       const refund = applyRefundToSale(part.sale, part.total, saleReturn.refundMethod);
       cashRefund += refund.cashRefund || 0;
       dueReduce += refund.dueReduce || 0;
+      storeCredit += refund.storeCredit || 0;
       await part.sale.save(sessionOpts(session));
       await createAuditLog(userId, 'return', 'sale', part.sale._id, null, {
         returnNumber: saleReturn.returnNumber,
@@ -199,8 +204,20 @@ const processSaleReturn = async (saleReturn, originalSale, userId, req, extra = 
       }, req);
     }
 
-    await postSaleReturnJournal(saleReturn, { cashRefund, dueReduce }, userId, session);
-    return { success: true, cashRefund, dueReduce };
+    if (storeCredit > 0 && saleReturn.customer) {
+      await recordStoreCredit(CustomerPayment, {
+        customerId: saleReturn.customer,
+        saleId: originalSale?._id || saleReturn.originalSale,
+        amount: storeCredit,
+        returnNumber: saleReturn.returnNumber,
+        userId,
+        session,
+      });
+      await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, saleReturn.customer);
+    }
+
+    await postSaleReturnJournal(saleReturn, { cashRefund, dueReduce, storeCredit }, userId, session);
+    return { success: true, cashRefund, dueReduce, storeCredit };
   });
 
 const processPurchaseReturn = async (purchaseReturn, originalPurchase, userId, req) =>
