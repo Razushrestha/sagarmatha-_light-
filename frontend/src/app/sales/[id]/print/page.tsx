@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { saleAPI, miscAPI } from "@/lib/api";
 import { COMPANY } from "@/lib/company";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { Printer, ArrowLeft, Receipt, X, Download } from "lucide-react";
 import Link from "next/link";
 import toast from "react-hot-toast";
@@ -38,6 +38,7 @@ interface Sale {
   payments: Array<{ method: string; amount: number }>;
   isVatBill: boolean;
   createdAt: string;
+  validityDate?: string;
   createdBy?: { name: string };
 }
 
@@ -63,10 +64,17 @@ export default function InvoicePrintPage() {
   const [payments, setPayments] = useState<PaymentLine[]>([{ method: "cash", amount: 0 }]);
   const [converting, setConverting] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [billDate, setBillDate] = useState("");
+  const [dueDate, setDueDate] = useState("");
 
   useEffect(() => {
     if (!id) return;
-    saleAPI.getById(id).then((r) => setSale(r.data.data));
+    saleAPI.getById(id).then((r) => {
+      const next = r.data.data as Sale;
+      setSale(next);
+      setBillDate(formatDateTime(next.createdAt));
+      setDueDate(formatDate(next.validityDate) || "");
+    });
     miscAPI.getSettings().then((r) => setSettings(r.data.data)).catch(() => {
       setSettings({
         companyName: COMPANY.name,
@@ -307,7 +315,23 @@ export default function InvoicePrintPage() {
                 </p>
                 <p className="text-lg font-bold">{sale.invoiceNumber}</p>
               </div>
-              <p className="text-sm text-gray-500 mt-2">{formatDateTime(sale.createdAt)}</p>
+              <label className="mt-3 flex items-center justify-end gap-2 text-sm text-gray-600">
+                <span className="shrink-0">Date (B.S.)</span>
+                <input
+                  value={billDate}
+                  onChange={(e) => setBillDate(e.target.value)}
+                  className="invoice-edit-field"
+                />
+              </label>
+              <label className="mt-1 flex items-center justify-end gap-2 text-sm text-gray-600">
+                <span className="shrink-0">Due Date (B.S.)</span>
+                <input
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  placeholder="YYYY/MM/DD"
+                  className="invoice-edit-field"
+                />
+              </label>
             </div>
           </div>
         </div>
@@ -412,10 +436,33 @@ export default function InvoicePrintPage() {
       </div>
 
       <style jsx global>{`
+        .invoice-edit-field {
+          border: none;
+          border-bottom: 1px dashed #9ca3af;
+          background: transparent;
+          text-align: right;
+          min-width: 11rem;
+          max-width: 14rem;
+          color: inherit;
+          padding: 1px 2px;
+        }
+        .invoice-edit-field:focus {
+          outline: none;
+          border-bottom-color: #1e3a5f;
+        }
+        .invoice-edit-field::placeholder {
+          color: #9ca3af;
+        }
         @media print {
           body * { visibility: hidden; }
           #invoice, #invoice * { visibility: visible; }
           #invoice { position: absolute; left: 0; top: 0; width: 100%; }
+          .invoice-edit-field {
+            border-bottom: none;
+          }
+          .invoice-edit-field::placeholder {
+            color: transparent;
+          }
         }
       `}</style>
     </div>

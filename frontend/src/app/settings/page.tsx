@@ -7,6 +7,8 @@ import { FormField } from "@/components/ui/FormField";
 import { FormCard, FormSection, FormGrid, FormCheckbox } from "@/components/ui/FormLayout";
 import { authAPI, miscAPI } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useCalendar } from "@/context/CalendarContext";
+import { CalendarType } from "@/lib/nepaliDate";
 import { Save, Shield } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -22,6 +24,7 @@ interface Settings {
   invoicePrefix: string;
   termsAndConditions: string;
   footerText: string;
+  calendarType?: CalendarType;
 }
 
 interface RoleInfo {
@@ -52,6 +55,7 @@ function roleLabel(role: string) {
 
 export default function SettingsPage() {
   const { user, hasPermission, refreshUser } = useAuth();
+  const { setCalendarType } = useCalendar();
   const canManageUsers = hasPermission("users:manage", "settings:manage");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,7 +67,10 @@ export default function SettingsPage() {
 
   useEffect(() => {
     miscAPI.getSettings()
-      .then((res) => setSettings(res.data.data))
+      .then((res) => setSettings({
+        ...res.data.data,
+        calendarType: res.data.data.calendarType === "ad" ? "ad" : "bs",
+      }))
       .catch(() => toast.error("Unable to load settings"))
       .finally(() => setLoading(false));
   }, []);
@@ -94,6 +101,7 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       await miscAPI.updateSettings(settings as unknown as Record<string, unknown>);
+      setCalendarType(settings.calendarType === "ad" ? "ad" : "bs");
       toast.success("Settings saved!");
     } catch {
       toast.error("Failed to save settings");
@@ -204,6 +212,29 @@ export default function SettingsPage() {
             </FormGrid>
             <div className="mt-3">
               <FormCheckbox id="vatInclusive" label="VAT inclusive pricing (Nepal 13%)" checked={settings.vatInclusive} onChange={(v) => update("vatInclusive", v)} />
+            </div>
+            <div className="mt-4">
+              <FormField label="Date type">
+                <div className="flex rounded-lg border border-brand-200 overflow-hidden">
+                  {([
+                    { id: "bs" as const, label: "Nepali (B.S.)" },
+                    { id: "ad" as const, label: "English (A.D.)" },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => update("calendarType", opt.id)}
+                      className={
+                        (settings.calendarType || "bs") === opt.id
+                          ? "flex-1 px-3 py-2 text-sm font-medium bg-brand-900 text-white"
+                          : "flex-1 px-3 py-2 text-sm font-medium bg-white text-brand-700 hover:bg-brand-50"
+                      }
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </FormField>
             </div>
             <div className="mt-3 space-y-3">
               <FormField label="Terms & Conditions">

@@ -24,10 +24,7 @@ function nprFigure(amount: number) {
 }
 
 function formatLedgerDate(date: string | Date) {
-  const d = new Date(date);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}/${mm}/${d.getFullYear()}`;
+  return formatDate(date);
 }
 
 function escapeHtml(value: string) {

@@ -6,7 +6,7 @@ import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
 import PurchaseVoucherForm, { PurchaseVoucherPayload } from "@/components/purchases/PurchaseVoucherForm";
 import { supplierAPI, productAPI, miscAPI } from "@/lib/api";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { COMPANY } from "@/lib/company";
 import { Plus, Truck, Printer, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -18,10 +18,7 @@ function nprFigure(amount: number) {
 }
 
 function formatLedgerDate(date: string | Date) {
-  const d = new Date(date);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}/${mm}/${d.getFullYear()}`;
+  return formatDate(date);
 }
 
 function escapeHtml(value: string) {
@@ -455,6 +452,7 @@ export default function PurchasesPage() {
           initialPurchase={editingPurchase}
           onSubmit={handleCreate}
           onCancel={() => { setShowModal(false); setEditingPurchase(null); }}
+          onProductCreated={(product) => setProducts((prev) => prev.some((p) => p._id === product._id) ? prev : [...prev, product])}
         />
       </Modal>
     </DashboardLayout>

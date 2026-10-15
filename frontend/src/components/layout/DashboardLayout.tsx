@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { useCalendar } from "@/context/CalendarContext";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import { COMPANY } from "@/lib/company";
@@ -12,6 +13,7 @@ import { useNavShortcuts } from "@/lib/navShortcuts";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const { calendarType } = useCalendar();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -60,7 +62,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!user) return null;
 
   return (
-    <div className="page-shell min-h-screen min-h-[100dvh] overflow-x-hidden">
+    <div className="page-shell min-h-screen min-h-[100dvh] overflow-x-hidden" data-calendar={calendarType}>
       {mobileOpen && (
         <button
           type="button"

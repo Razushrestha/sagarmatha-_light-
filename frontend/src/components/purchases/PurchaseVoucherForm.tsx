@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, KeyboardEvent } from "react";
-import { Search, Trash2, Package, Save, X } from "lucide-react";
+import { Search, Trash2, Package, Save, X, Plus } from "lucide-react";
 import { FormField, SelectField } from "@/components/ui/FormField";
 import { formatCurrency, cn } from "@/lib/utils";
+import DateInput from "@/components/ui/DateInput";
+import { todayISO, addDaysISO, toLocalISODate } from "@/lib/nepaliDate";
+import ProductQuickCreate from "@/components/inventory/ProductQuickCreate";
 
 export interface PurchaseVoucherItem {
   productId: string;
@@ -54,7 +57,7 @@ interface ProductOption {
   sku?: string;
   purchasePrice: number;
   currentStock?: number;
-  unit?: { name?: string; symbol?: string } | string;
+  unit?: { name?: string; symbol?: string };
 }
 
 interface SupplierOption {
@@ -100,6 +103,7 @@ interface PurchaseVoucherFormProps {
   } | null;
   onSubmit: (payload: PurchaseVoucherPayload) => void;
   onCancel: () => void;
+  onProductCreated?: (product: ProductOption) => void;
 }
 
 function safeNum(value: number | undefined | null, fallback = 0): number {
@@ -112,15 +116,6 @@ function getProductUnit(product: ProductOption): string {
   return product.unit.symbol || product.unit.name || "Pcs";
 }
 
-function todayISO() {
-  return new Date().toISOString().split("T")[0];
-}
-
-function addDaysISO(days: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
-}
 
 const cellInput = "w-full h-8 px-2 text-sm border border-brand-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-brand-900/10 focus:border-brand-400";
 
@@ -135,6 +130,7 @@ export default function PurchaseVoucherForm({
   initialPurchase = null,
   onSubmit,
   onCancel,
+  onProductCreated,
 }: PurchaseVoucherFormProps) {
   const isOrder = mode === "order";
   const [supplierId, setSupplierId] = useState(defaultSupplierId);
@@ -158,6 +154,8 @@ export default function PurchaseVoucherForm({
 
   const [amountPaid, setAmountPaid] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [extraProducts, setExtraProducts] = useState<ProductOption[]>([]);
+  const [showNewItem, setShowNewItem] = useState(false);
 
   useEffect(() => {
     if (defaultSupplierId) setSupplierId(defaultSupplierId);
@@ -175,7 +173,7 @@ export default function PurchaseVoucherForm({
       : initialPurchase.warehouse || "";
     if (wid) setWarehouseId(wid);
     if (initialPurchase.createdAt) {
-      setVoucherDate(new Date(initialPurchase.createdAt).toISOString().split("T")[0]);
+      setVoucherDate(toLocalISODate(initialPurchase.createdAt));
     }
     setNarration(initialPurchase.notes || "");
     setTermsConditions(initialPurchase.terms || "");
@@ -207,7 +205,9 @@ export default function PurchaseVoucherForm({
     }
   }, [warehouses, warehouseId]);
 
-  const filteredProducts = products.filter((p) => {
+  const catalog = [...products, ...extraProducts.filter((p) => !products.some((x) => x._id === p._id))];
+
+  const filteredProducts = catalog.filter((p) => {
     if (!itemSearch.trim()) return false;
     const q = itemSearch.toLowerCase();
     return p.name.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q);
@@ -369,11 +369,11 @@ export default function PurchaseVoucherForm({
       <div className="px-6 py-4 bg-brand-50/80 border-b border-brand-200 shrink-0">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
           <FormField label={isOrder ? "Record Date" : "Voucher Date"}>
-            <input type="date" value={voucherDate} onChange={(e) => setVoucherDate(e.target.value)} className={cn(cellInput, "text-sm")} />
+            <DateInput value={voucherDate} onChange={setVoucherDate} className={cn(cellInput, "text-sm")} />
           </FormField>
           {!isOrder && (
             <FormField label="Due Date">
-              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={cn(cellInput, "text-sm")} />
+              <DateInput value={dueDate} onChange={setDueDate} className={cn(cellInput, "text-sm")} />
             </FormField>
           )}
           <FormField label={isOrder ? "Supplier / Creditor" : "Supplier"} required className="sm:col-span-2 lg:col-span-1">
@@ -395,7 +395,7 @@ export default function PurchaseVoucherForm({
           )}
           {isOrder && (
             <FormField label="Expected Delivery" className="sm:col-span-2 lg:col-span-1">
-              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={cn(cellInput, "text-sm")} />
+              <DateInput value={dueDate} onChange={setDueDate} className={cn(cellInput, "text-sm")} />
             </FormField>
           )}
         </div>
@@ -408,18 +408,47 @@ export default function PurchaseVoucherForm({
 
       {/* Search */}
       <div className="px-6 py-3 border-b border-brand-100 bg-white shrink-0">
-        <div className="relative max-w-2xl">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-400 pointer-events-none" />
-          <input
-            ref={searchRef}
-            type="text"
-            value={itemSearch}
-            onChange={(e) => setItemSearch(e.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            placeholder="Search item by name or SKU. Press Enter to add"
-            className="input-field pl-10 h-9 text-sm"
-          />
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center max-w-3xl">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-400 pointer-events-none" />
+            <input
+              ref={searchRef}
+              type="text"
+              value={itemSearch}
+              onChange={(e) => setItemSearch(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search item by name or SKU. Press Enter to add"
+              className="input-field pl-10 h-9 text-sm"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowNewItem((open) => !open)}
+            className="btn-secondary h-9 text-xs px-3 inline-flex items-center gap-1 shrink-0"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add new item
+          </button>
         </div>
+        {showNewItem && (
+          <ProductQuickCreate
+            defaultWarehouse={warehouseId}
+            onCancel={() => setShowNewItem(false)}
+            onCreated={(created) => {
+              const product: ProductOption = {
+                _id: created._id,
+                name: created.name,
+                sku: created.sku,
+                purchasePrice: created.purchasePrice,
+                currentStock: created.currentStock,
+                unit: typeof created.unit === "string" ? { name: created.unit } : created.unit,
+              };
+              setExtraProducts((prev) => [...prev, product]);
+              onProductCreated?.(product);
+              addProduct(product);
+              setShowNewItem(false);
+            }}
+          />
+        )}
         {itemSearch.trim() && filteredProducts.length > 0 && (
           <div className="mt-2 max-w-2xl border border-brand-200 rounded-lg overflow-hidden max-h-32 overflow-y-auto shadow-sm bg-white">
             {filteredProducts.slice(0, 8).map((p) => (

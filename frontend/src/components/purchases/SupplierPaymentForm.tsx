@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Save, X } from "lucide-react";
 import { FormField, SelectField } from "@/components/ui/FormField";
 import { formatCurrency, cn } from "@/lib/utils";
+import DateInput from "@/components/ui/DateInput";
+import { todayISO, toLocalISODate } from "@/lib/nepaliDate";
 
 export interface SupplierPaymentPayload {
   supplier: string;
@@ -69,10 +71,6 @@ function safeNum(value: number | undefined | null, fallback = 0): number {
   return Number.isFinite(value) ? Number(value) : fallback;
 }
 
-function todayISO() {
-  return new Date().toISOString().split("T")[0];
-}
-
 const cellInput = "w-full h-9 px-3 text-sm border border-brand-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-brand-900/10 focus:border-brand-400";
 
 export default function SupplierPaymentForm({
@@ -116,7 +114,7 @@ export default function SupplierPaymentForm({
       : initialPayment.paidFromAccount || "";
     if (aid) setPaidFromAccount(aid);
     if (initialPayment.voucherDate) {
-      setVoucherDate(new Date(initialPayment.voucherDate).toISOString().split("T")[0]);
+      setVoucherDate(toLocalISODate(initialPayment.voucherDate));
     }
     setBankName(initialPayment.bankName || "");
     setAmount(safeNum(initialPayment.amount));
@@ -229,7 +227,7 @@ export default function SupplierPaymentForm({
       <div className="px-6 py-4 bg-brand-50/80 border-b border-brand-200 shrink-0">
         <div className={`grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 ${isBankAccount ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
           <FormField label="Voucher Date">
-            <input type="date" value={voucherDate} onChange={(e) => setVoucherDate(e.target.value)} className={cellInput} />
+            <DateInput value={voucherDate} onChange={setVoucherDate} className={cellInput} />
           </FormField>
           <FormField label="Paid To" required>
             <SelectField

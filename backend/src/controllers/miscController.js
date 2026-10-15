@@ -123,6 +123,10 @@ exports.getStockMovements = async (req, res) => {
 exports.getSettings = async (req, res) => {
   let settings = await Settings.findOne();
   if (!settings) settings = await Settings.create({});
+  if (!settings.calendarType) {
+    settings.calendarType = 'bs';
+    await settings.save();
+  }
   res.json({ success: true, data: settings });
 };
 

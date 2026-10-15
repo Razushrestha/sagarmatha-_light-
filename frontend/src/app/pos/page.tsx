@@ -13,6 +13,7 @@ import {
   Banknote, User, UserPlus, Users, X, ScanBarcode, RotateCcw, Package, FileText, Receipt, Warehouse, Zap,
 } from "lucide-react";
 import WarehouseSelect, { pickDefaultWarehouseId } from "@/components/ui/WarehouseSelect";
+import DateInput from "@/components/ui/DateInput";
 
 interface Product {
   _id: string;
@@ -1178,11 +1179,10 @@ export default function POSPage() {
                         </div>
                         <div>
                           <label className="label">Balance As Of Date</label>
-                          <input
-                            type="date"
+                          <DateInput
                             className="input-field"
                             value={newCustomer.openingBalanceDate}
-                            onChange={(e) => setNewCustomer({ ...newCustomer, openingBalanceDate: e.target.value })}
+                            onChange={(value) => setNewCustomer({ ...newCustomer, openingBalanceDate: value })}
                           />
                         </div>
                         <div>

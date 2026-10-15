@@ -11,7 +11,7 @@ import SupplierPaymentForm, { SupplierPaymentPayload } from "@/components/purcha
 import { FormField, SelectField, SearchableSelect } from "@/components/ui/FormField";
 import { FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { supplierAPI, productAPI, miscAPI, accountingAPI } from "@/lib/api";
-import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
 import { COMPANY } from "@/lib/company";
 import { ArrowLeft, ShoppingCart, RotateCcw, Building2, Printer, Banknote, Plus, Truck, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
@@ -112,10 +112,7 @@ function nprFigure(amount: number) {
 }
 
 function formatLedgerDate(date: string | Date) {
-  const d = new Date(date);
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}/${mm}/${d.getFullYear()}`;
+  return formatDate(date);
 }
 
 function escapeHtml(value: string) {
@@ -747,6 +744,7 @@ export default function SupplierDetailPage() {
             initialPurchase={editingPurchase}
             onSubmit={handlePurchase}
             onCancel={() => { setEditingPurchase(null); setTab("history"); }}
+            onProductCreated={(product) => setProducts((prev) => prev.some((p) => p._id === product._id) ? prev : [...prev, product])}
           />
         </div>
       )}

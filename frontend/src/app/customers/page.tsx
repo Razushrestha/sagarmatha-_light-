@@ -5,6 +5,7 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
 import { FormField, SelectField } from "@/components/ui/FormField";
+import DateInput from "@/components/ui/DateInput";
 import { FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { customerAPI } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
@@ -339,11 +340,10 @@ export default function CustomersPage() {
                 />
               </FormField>
               <FormField label="Balance As Of Date" className="sm:col-span-2">
-                <input
-                  type="date"
+                <DateInput
                   className="input-field"
                   value={form.openingBalanceDate}
-                  onChange={(e) => setForm({ ...form, openingBalanceDate: e.target.value })}
+                  onChange={(value) => setForm({ ...form, openingBalanceDate: value })}
                 />
               </FormField>
             </FormGrid>

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "@/context/AuthContext";
+import { CalendarProvider } from "@/context/CalendarContext";
 import "./globals.css";
 import { COMPANY } from "@/lib/company";
 
@@ -34,18 +35,20 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} ${inter.className} antialiased`}>
         <AuthProvider>
-          {children}
-          <Toaster
-            position="top-center"
-            toastOptions={{
-              className: "max-w-[calc(100vw-1.5rem)]",
-              style: {
-                background: "#111827",
-                color: "#fff",
-                borderRadius: "8px",
-              },
-            }}
-          />
+          <CalendarProvider>
+            {children}
+            <Toaster
+              position="top-center"
+              toastOptions={{
+                className: "max-w-[calc(100vw-1.5rem)]",
+                style: {
+                  background: "#111827",
+                  color: "#fff",
+                  borderRadius: "8px",
+                },
+              }}
+            />
+          </CalendarProvider>
         </AuthProvider>
       </body>
     </html>

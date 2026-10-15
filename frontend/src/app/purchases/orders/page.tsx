@@ -179,6 +179,7 @@ export default function PurchaseOrdersPage() {
           saving={saving}
           onSubmit={handleCreate}
           onCancel={() => setShowModal(false)}
+          onProductCreated={(product) => setProducts((prev) => prev.some((p) => p._id === product._id) ? prev : [...prev, product])}
         />
       </Modal>
     </DashboardLayout>

@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { formatAdDate, formatAdDateTime, formatBsDate, formatBsDateTime, getCalendarType } from "./nepaliDate";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -10,22 +11,14 @@ export function formatCurrency(amount: number): string {
   return `NPR ${value.toLocaleString("en-NP", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function formatDate(date: string | Date): string {
-  return new Date(date).toLocaleDateString("en-NP", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+export function formatDate(date?: string | Date | null): string {
+  if (!date) return "";
+  return getCalendarType() === "ad" ? formatAdDate(date) : formatBsDate(date) || formatAdDate(date);
 }
 
-export function formatDateTime(date: string | Date): string {
-  return new Date(date).toLocaleString("en-NP", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+export function formatDateTime(date?: string | Date | null): string {
+  if (!date) return "";
+  return getCalendarType() === "ad" ? formatAdDateTime(date) : formatBsDateTime(date) || formatAdDateTime(date);
 }
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/api$/, "");

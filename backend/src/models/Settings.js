@@ -12,6 +12,7 @@ const settingsSchema = new mongoose.Schema({
   vatRate: { type: Number, default: 13 },
   vatInclusive: { type: Boolean, default: true },
   currency: { type: String, default: 'NPR' },
+  calendarType: { type: String, enum: ['bs', 'ad'], default: 'bs' },
   invoicePrefix: { type: String, default: 'INV' },
   invoiceStartNumber: { type: Number, default: 1 },
   purchasePrefix: { type: String, default: 'PO' },
