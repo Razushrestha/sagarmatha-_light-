@@ -1,5 +1,3 @@
-const Product = require('../models/Product');
-const { StockMovement } = require('../models/Warehouse');
 const Customer = require('../models/Customer');
 const Sale = require('../models/Sale');
 const Supplier = require('../models/Supplier');
@@ -8,6 +6,7 @@ const Notification = require('../models/Notification');
 const { createAuditLog } = require('../middleware/audit');
 const { postSaleJournal, postSaleReturnJournal, postPurchaseJournal } = require('./journalService');
 const { withOptionalTransaction, sessionQuery, sessionOpts } = require('../utils/mongoTransaction');
+const { changeStock } = require('../utils/stock');
 const { resolveWarehouseId } = require('../utils/warehouse');
 const CustomerPayment = require('../models/CustomerPayment');
 const { applyAllocationsToSale, applyRefundToSale } = require('../utils/saleReturn');
@@ -19,26 +18,17 @@ const processSale = async (sale, userId, req) =>
     sale.warehouse = warehouseId;
 
     for (const item of sale.items) {
-      const product = await sessionQuery(Product.findById(item.product), session);
-      if (!product) throw new Error(`Product not found: ${item.productName}`);
-
-      if (product.currentStock < item.quantity) {
-        throw new Error(`Insufficient stock for ${product.name}. Available: ${product.currentStock}`);
-      }
-
-      product.currentStock -= item.quantity;
-      await product.save(sessionOpts(session));
-
-      await StockMovement.create([{
-        product: product._id,
-        warehouse: warehouseId,
+      const product = await changeStock({
+        productId: item.product,
+        productName: item.productName,
+        delta: -item.quantity,
+        session,
+        warehouseId,
         type: 'sale',
-        quantity: -item.quantity,
-        balanceAfter: product.currentStock,
         reference: sale.invoiceNumber,
         referenceId: sale._id,
-        createdBy: userId,
-      }], sessionOpts(session));
+        userId,
+      });
 
       if (product.currentStock <= product.minStock) {
         await Notification.create([{
@@ -74,24 +64,21 @@ const processPurchase = async (purchase, userId, req) =>
     purchase.warehouse = warehouseId;
 
     for (const item of purchase.items) {
-      const product = await sessionQuery(Product.findById(item.product), session);
-      if (!product) throw new Error(`Product not found: ${item.productName}`);
-
-      product.currentStock += item.quantity;
-      product.purchasePrice = item.unitPrice;
-      product.priceHistory.push({ price: item.unitPrice, type: 'purchase' });
-      await product.save(sessionOpts(session));
-
-      await StockMovement.create([{
-        product: product._id,
-        warehouse: warehouseId,
+      await changeStock({
+        productId: item.product,
+        productName: item.productName,
+        delta: item.quantity,
+        session,
+        warehouseId,
         type: 'purchase',
-        quantity: item.quantity,
-        balanceAfter: product.currentStock,
         reference: purchase.invoiceNumber,
         referenceId: purchase._id,
-        createdBy: userId,
-      }], sessionOpts(session));
+        userId,
+        extraUpdate: {
+          $set: { purchasePrice: item.unitPrice },
+          $push: { priceHistory: { price: item.unitPrice, type: 'purchase', date: new Date() } },
+        },
+      });
     }
 
     const supplier = await sessionQuery(Supplier.findById(purchase.supplier), session);
@@ -113,26 +100,26 @@ const reversePurchase = async (purchase, userId, req) =>
     const warehouseId = await resolveWarehouseId(purchase.warehouse);
 
     for (const item of purchase.items) {
-      const product = await sessionQuery(Product.findById(item.product), session);
-      if (!product) throw new Error(`Product not found: ${item.productName}`);
-      if (product.currentStock < item.quantity) {
-        throw new Error(
-          `Cannot reverse ${purchase.invoiceNumber}. ${product.name} stock is ${product.currentStock}, need ${item.quantity} to undo this purchase.`
-        );
+      try {
+        await changeStock({
+          productId: item.product,
+          productName: item.productName,
+          delta: -item.quantity,
+          session,
+          warehouseId,
+          type: 'adjustment_minus',
+          reference: `${purchase.invoiceNumber}-REV`,
+          referenceId: purchase._id,
+          userId,
+        });
+      } catch (error) {
+        if (String(error.message).startsWith('Insufficient stock')) {
+          throw new Error(
+            `Cannot reverse ${purchase.invoiceNumber}. ${item.productName} does not have enough stock to undo this purchase.`
+          );
+        }
+        throw error;
       }
-      product.currentStock -= item.quantity;
-      await product.save(sessionOpts(session));
-
-      await StockMovement.create([{
-        product: product._id,
-        warehouse: warehouseId,
-        type: 'adjustment_minus',
-        quantity: -item.quantity,
-        balanceAfter: product.currentStock,
-        reference: `${purchase.invoiceNumber}-REV`,
-        referenceId: purchase._id,
-        createdBy: userId,
-      }], sessionOpts(session));
     }
 
     const supplier = await sessionQuery(Supplier.findById(purchase.supplier), session);
@@ -156,21 +143,17 @@ const reverseSale = async (sale, userId, req) =>
     const warehouseId = await resolveWarehouseId(sale.warehouse);
 
     for (const item of sale.items) {
-      const product = await sessionQuery(Product.findById(item.product), session);
-      if (!product) throw new Error(`Product not found: ${item.productName}`);
-      product.currentStock += item.quantity;
-      await product.save(sessionOpts(session));
-
-      await StockMovement.create([{
-        product: product._id,
-        warehouse: warehouseId,
+      await changeStock({
+        productId: item.product,
+        productName: item.productName,
+        delta: item.quantity,
+        session,
+        warehouseId,
         type: 'sale_return',
-        quantity: item.quantity,
-        balanceAfter: product.currentStock,
         reference: `${sale.invoiceNumber}-REV`,
         referenceId: sale._id,
-        createdBy: userId,
-      }], sessionOpts(session));
+        userId,
+      });
     }
 
     const customerId = sale.customer?._id || sale.customer;
@@ -209,22 +192,17 @@ const processSaleReturn = async (saleReturn, originalSale, userId, req, extra = 
     let storeCredit = 0;
 
     for (const item of saleReturn.items) {
-      const product = await sessionQuery(Product.findById(item.product), session);
-      if (!product) throw new Error(`Product not found: ${item.productName}`);
-
-      product.currentStock += item.quantity;
-      await product.save(sessionOpts(session));
-
-      await StockMovement.create([{
-        product: product._id,
-        warehouse: warehouseId,
+      await changeStock({
+        productId: item.product,
+        productName: item.productName,
+        delta: item.quantity,
+        session,
+        warehouseId,
         type: 'sale_return',
-        quantity: item.quantity,
-        balanceAfter: product.currentStock,
         reference: saleReturn.returnNumber,
         referenceId: saleReturn._id,
-        createdBy: userId,
-      }], sessionOpts(session));
+        userId,
+      });
     }
 
     for (const part of parts) {
@@ -266,26 +244,17 @@ const processPurchaseReturn = async (purchaseReturn, originalPurchase, userId, r
     const warehouseId = await resolveWarehouseId(purchaseReturn.warehouse || originalPurchase.warehouse);
 
     for (const item of purchaseReturn.items) {
-      const product = await sessionQuery(Product.findById(item.product), session);
-      if (!product) throw new Error(`Product not found: ${item.productName}`);
-
-      if (product.currentStock < item.quantity) {
-        throw new Error(`Insufficient stock to return ${product.name}. Available: ${product.currentStock}`);
-      }
-
-      product.currentStock -= item.quantity;
-      await product.save(sessionOpts(session));
-
-      await StockMovement.create([{
-        product: product._id,
-        warehouse: warehouseId,
+      await changeStock({
+        productId: item.product,
+        productName: item.productName,
+        delta: -item.quantity,
+        session,
+        warehouseId,
         type: 'purchase_return',
-        quantity: -item.quantity,
-        balanceAfter: product.currentStock,
         reference: purchaseReturn.returnNumber,
         referenceId: purchaseReturn._id,
-        createdBy: userId,
-      }], sessionOpts(session));
+        userId,
+      });
     }
 
     const supplier = await sessionQuery(Supplier.findById(purchaseReturn.supplier), session);
@@ -311,22 +280,17 @@ const reversePurchaseReturn = async (purchaseReturn, originalPurchase, userId, r
     const warehouseId = await resolveWarehouseId(purchaseReturn.warehouse || originalPurchase.warehouse);
 
     for (const item of purchaseReturn.items) {
-      const product = await sessionQuery(Product.findById(item.product), session);
-      if (!product) throw new Error(`Product not found: ${item.productName}`);
-
-      product.currentStock += item.quantity;
-      await product.save(sessionOpts(session));
-
-      await StockMovement.create([{
-        product: product._id,
-        warehouse: warehouseId,
+      await changeStock({
+        productId: item.product,
+        productName: item.productName,
+        delta: item.quantity,
+        session,
+        warehouseId,
         type: 'adjustment_plus',
-        quantity: item.quantity,
-        balanceAfter: product.currentStock,
         reference: `${purchaseReturn.returnNumber}-REV`,
         referenceId: purchaseReturn._id,
-        createdBy: userId,
-      }], sessionOpts(session));
+        userId,
+      });
     }
 
     const supplier = await sessionQuery(Supplier.findById(purchaseReturn.supplier), session);

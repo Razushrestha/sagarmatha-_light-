@@ -1,10 +1,10 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireShopTenant } = require('../middleware/auth');
 const saleController = require('../controllers/saleController');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, requireShopTenant);
 
 // Static paths first. Never place these after /:id
 router.get('/dashboard', authorize('reports:view', 'pos:access', 'invoice:read'), saleController.getDashboardStats);

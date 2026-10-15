@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const allocationSchema = new mongoose.Schema({
   purchase: { type: mongoose.Schema.Types.ObjectId, ref: 'Purchase', required: true },
@@ -6,7 +7,7 @@ const allocationSchema = new mongoose.Schema({
 });
 
 const supplierPaymentSchema = new mongoose.Schema({
-  paymentNumber: { type: String, required: true, unique: true },
+  paymentNumber: { type: String, required: true },
   supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
   voucherDate: { type: Date, default: Date.now },
   paidFromAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', required: true },
@@ -21,5 +22,8 @@ const supplierPaymentSchema = new mongoose.Schema({
   purchaseAllocations: [allocationSchema],
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 }, { timestamps: true });
+
+applyTenantPlugin(supplierPaymentSchema, { uniqueFields: ['paymentNumber'] });
+supplierPaymentSchema.index({ tenantId: 1, supplier: 1, voucherDate: -1 });
 
 module.exports = mongoose.model('SupplierPayment', supplierPaymentSchema);

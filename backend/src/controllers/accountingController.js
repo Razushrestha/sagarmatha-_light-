@@ -1,3 +1,7 @@
+const { scoped, scopedMatch, parsePaging } = require('../utils/tenantQuery');
+const { tenantKey, cacheGet, cacheSet } = require('../utils/cache');
+const { buildShopReport } = require('../services/reportService');
+const { enqueue, jobResultKey, setJobResult, getJobResult } = require('../utils/jobs');
 const { Account, JournalEntry } = require('../models/Account');
 const Expense = require('../models/Expense');
 const Sale = require('../models/Sale');
@@ -8,7 +12,7 @@ const Supplier = require('../models/Supplier');
 
 exports.getAccounts = async (req, res) => {
   try {
-    const accounts = await Account.find({ isActive: true }).sort({ code: 1 }).lean();
+    const accounts = await Account.find(scoped(req, { isActive: true })).sort({ code: 1 }).lean();
     res.json({ success: true, data: accounts });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -17,19 +21,19 @@ exports.getAccounts = async (req, res) => {
 
 exports.getJournalEntries = async (req, res) => {
   try {
-    const { page = 1, limit = 30 } = req.query;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePaging(req.query, { defaultLimit: 30, max: 100 });
+    const filter = scoped(req);
     const [entries, total] = await Promise.all([
-      JournalEntry.find()
+      JournalEntry.find(filter)
         .populate('entries.account', 'code name type')
         .populate('createdBy', 'name')
         .sort({ date: -1 })
         .skip(skip)
-        .limit(Number(limit))
+        .limit(limit)
         .lean(),
-      JournalEntry.countDocuments(),
+      JournalEntry.countDocuments(filter),
     ]);
-    res.json({ success: true, data: entries, pagination: { total, page: Number(page) } });
+    res.json({ success: true, data: entries, pagination: { total, page, pages: Math.ceil(total / limit) || 1, limit } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -37,50 +41,53 @@ exports.getJournalEntries = async (req, res) => {
 
 exports.getFinancialSummary = async (req, res) => {
   try {
+    const cacheKey = tenantKey(['reports', 'summary']);
+    const cached = await cacheGet(cacheKey);
+    if (cached) return res.json({ success: true, data: cached });
+
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
 
     const [salesRevenue, purchaseCost, expenses, receivables, payables, inventoryValue, accounts] = await Promise.all([
       Sale.aggregate([
-        { $match: { type: 'invoice', status: 'completed', createdAt: { $gte: monthStart } } },
+        scopedMatch(req, { type: 'invoice', status: 'completed', createdAt: { $gte: monthStart } }),
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Purchase.aggregate([
-        { $match: { status: { $in: ['completed', 'received'] }, createdAt: { $gte: monthStart } } },
+        scopedMatch(req, { status: { $in: ['completed', 'received'] }, createdAt: { $gte: monthStart } }),
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Expense.aggregate([
-        { $match: { status: 'approved', date: { $gte: monthStart } } },
+        scopedMatch(req, { status: 'approved', date: { $gte: monthStart } }),
         { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
-      Customer.aggregate([{ $group: { _id: null, total: { $sum: '$outstanding' } } }]),
-      Supplier.aggregate([{ $group: { _id: null, total: { $sum: '$outstanding' } } }]),
+      Customer.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
+      Supplier.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
       Product.aggregate([
-        { $match: { isActive: true } },
+        scopedMatch(req, { isActive: true }),
         { $group: { _id: null, total: { $sum: { $multiply: ['$currentStock', '$purchasePrice'] } } } },
       ]),
-      Account.find({ isActive: true }).sort({ code: 1 }).lean(),
+      Account.find(scoped(req, { isActive: true })).sort({ code: 1 }).lean(),
     ]);
 
     const revenue = salesRevenue[0]?.total || 0;
     const cogs = purchaseCost[0]?.total || 0;
     const expenseTotal = expenses[0]?.total || 0;
 
-    res.json({
-      success: true,
-      data: {
-        monthlyRevenue: revenue,
-        monthlyCOGS: cogs,
-        grossProfit: revenue - cogs,
-        monthlyExpenses: expenseTotal,
-        netProfit: revenue - cogs - expenseTotal,
-        receivables: receivables[0]?.total || 0,
-        payables: payables[0]?.total || 0,
-        inventoryValue: inventoryValue[0]?.total || 0,
-        accounts: accounts,
-      },
-    });
+    const data = {
+      monthlyRevenue: revenue,
+      monthlyCOGS: cogs,
+      grossProfit: revenue - cogs,
+      monthlyExpenses: expenseTotal,
+      netProfit: revenue - cogs - expenseTotal,
+      receivables: receivables[0]?.total || 0,
+      payables: payables[0]?.total || 0,
+      inventoryValue: inventoryValue[0]?.total || 0,
+      accounts,
+    };
+    await cacheSet(cacheKey, data, 45);
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -101,19 +108,19 @@ exports.getProfitLoss = async (req, res) => {
 
     const [salesRevenue, purchaseCost, expenses, incomeAccounts, expenseAccounts] = await Promise.all([
       Sale.aggregate([
-        { $match: { type: 'invoice', status: 'completed', ...matchDate } },
+        scopedMatch(req, { type: 'invoice', status: 'completed', ...matchDate }),
         { $group: { _id: null, total: { $sum: '$total' }, vat: { $sum: '$vatAmount' } } },
       ]),
       Purchase.aggregate([
-        { $match: { status: { $in: ['completed', 'received'] }, ...matchDate } },
+        scopedMatch(req, { status: { $in: ['completed', 'received'] }, ...matchDate }),
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Expense.aggregate([
-        { $match: { status: 'approved', ...expenseDate } },
+        scopedMatch(req, { status: 'approved', ...expenseDate }),
         { $group: { _id: '$category', total: { $sum: '$amount' } } },
       ]),
-      Account.find({ type: 'income', isActive: true }).sort({ code: 1 }).lean(),
-      Account.find({ type: 'expense', isActive: true }).sort({ code: 1 }).lean(),
+      Account.find(scoped(req, { type: 'income', isActive: true })).sort({ code: 1 }).lean(),
+      Account.find(scoped(req, { type: 'expense', isActive: true })).sort({ code: 1 }).lean(),
     ]);
 
     const revenue = salesRevenue[0]?.total || 0;
@@ -144,7 +151,7 @@ exports.getProfitLoss = async (req, res) => {
 
 exports.getBalanceSheet = async (req, res) => {
   try {
-    const accounts = await Account.find({ isActive: true }).sort({ code: 1 }).lean();
+    const accounts = await Account.find(scoped(req, { isActive: true })).sort({ code: 1 }).lean();
     const grouped = { asset: [], liability: [], equity: [] };
     let totalAssets = 0;
     let totalLiabilities = 0;
@@ -160,10 +167,10 @@ exports.getBalanceSheet = async (req, res) => {
     }
 
     const [receivables, payables, inventoryValue] = await Promise.all([
-      Customer.aggregate([{ $group: { _id: null, total: { $sum: '$outstanding' } } }]),
-      Supplier.aggregate([{ $group: { _id: null, total: { $sum: '$outstanding' } } }]),
+      Customer.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
+      Supplier.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
       Product.aggregate([
-        { $match: { isActive: true } },
+        scopedMatch(req, { isActive: true }),
         { $group: { _id: null, total: { $sum: { $multiply: ['$currentStock', '$purchasePrice'] } } } },
       ]),
     ]);
@@ -189,14 +196,14 @@ exports.getBalanceSheet = async (req, res) => {
 
 exports.getExpenses = async (req, res) => {
   try {
-    const { page = 1, limit = 30, category } = req.query;
-    const query = category ? { category } : {};
-    const skip = (page - 1) * limit;
+    const { category } = req.query;
+    const { page, limit, skip } = parsePaging(req.query, { defaultLimit: 30, max: 100 });
+    const query = scoped(req, category ? { category } : {});
     const [expenses, total] = await Promise.all([
-      Expense.find(query).populate('createdBy', 'name').sort({ date: -1 }).skip(skip).limit(Number(limit)).lean(),
+      Expense.find(query).populate('createdBy', 'name').sort({ date: -1 }).skip(skip).limit(limit).lean(),
       Expense.countDocuments(query),
     ]);
-    res.json({ success: true, data: expenses, pagination: { total, page: Number(page) } });
+    res.json({ success: true, data: expenses, pagination: { total, page, pages: Math.ceil(total / limit) || 1, limit } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -239,52 +246,34 @@ exports.deleteExpense = async (req, res) => {
 
 exports.getReports = async (req, res) => {
   try {
-    const { type = 'sales', startDate, endDate } = req.query;
-    const dateFilter = {};
-    if (startDate) dateFilter.$gte = new Date(startDate);
-    if (endDate) dateFilter.$lte = new Date(endDate);
-    const matchDate = Object.keys(dateFilter).length ? { createdAt: dateFilter } : {};
-
-    let data = {};
-
-    if (type === 'sales') {
-      data = await Sale.aggregate([
-        { $match: { type: 'invoice', status: 'completed', ...matchDate } },
-        {
-          $group: {
-            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-            total: { $sum: '$total' },
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { _id: 1 } },
-      ]);
-    } else if (type === 'products') {
-      data = await Sale.aggregate([
-        { $match: { type: 'invoice', status: 'completed', ...matchDate } },
-        { $unwind: '$items' },
-        {
-          $group: {
-            _id: '$items.productName',
-            quantity: { $sum: '$items.quantity' },
-            revenue: { $sum: '$items.subtotal' },
-          },
-        },
-        { $sort: { revenue: -1 } },
-        { $limit: 20 },
-      ]);
-    } else if (type === 'inventory') {
-      data = await Product.find({ isActive: true })
-        .select('name sku currentStock minStock purchasePrice sellingPrice')
-        .sort({ currentStock: 1 })
-        .lean();
-    } else if (type === 'lowstock') {
-      data = await Product.find({ isActive: true, $expr: { $lte: ['$currentStock', '$minStock'] } })
-        .select('name sku currentStock minStock')
-        .lean();
-    }
-
+    const { type = 'sales', startDate, endDate, page, limit } = req.query;
+    const data = await buildShopReport(req, { type, startDate, endDate, page, limit });
     res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.enqueueReport = async (req, res) => {
+  try {
+    const { type = 'products', startDate, endDate } = req.body || {};
+    const tenantId = String(req.tenantId);
+    const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await setJobResult(jobResultKey(tenantId, jobId), { status: 'queued', type });
+    await enqueue('shop-report', { tenantId, jobId, type, startDate, endDate });
+    res.status(202).json({ success: true, data: { jobId, status: 'queued' } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getReportJob = async (req, res) => {
+  try {
+    const stored = await getJobResult(jobResultKey(String(req.tenantId), req.params.jobId));
+    if (!stored) {
+      return res.status(404).json({ success: false, message: 'Report job not found or expired.' });
+    }
+    res.json({ success: true, data: stored });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const expenseSchema = new mongoose.Schema({
   category: { type: String, required: true },
@@ -11,5 +12,8 @@ const expenseSchema = new mongoose.Schema({
   approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 }, { timestamps: true });
+
+applyTenantPlugin(expenseSchema);
+expenseSchema.index({ tenantId: 1, status: 1, date: -1 });
 
 module.exports = mongoose.model('Expense', expenseSchema);

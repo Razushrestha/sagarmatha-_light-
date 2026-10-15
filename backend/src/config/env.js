@@ -50,6 +50,12 @@ function corsOrigins() {
   ].filter(Boolean));
 }
 
+function impersonateMs() {
+  const minutes = Number(process.env.IMPERSONATE_MINUTES || 30);
+  const clamped = Math.min(60, Math.max(15, Number.isFinite(minutes) ? minutes : 30));
+  return clamped * 60 * 1000;
+}
+
 function cookieOptions() {
   const secure =
     process.env.COOKIE_SECURE === 'true'
@@ -73,6 +79,7 @@ module.exports = {
   assertProductionEnv,
   corsOrigins,
   cookieOptions,
+  impersonateMs,
   frontendPort,
   backendPort,
   mongoPort,

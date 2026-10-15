@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const accountSchema = new mongoose.Schema({
-  code: { type: String, required: true, unique: true },
+  code: { type: String, required: true },
   name: { type: String, required: true },
   type: {
     type: String,
@@ -26,6 +27,9 @@ const journalEntrySchema = new mongoose.Schema({
   }],
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
+
+applyTenantPlugin(accountSchema, { uniqueFields: ['code'] });
+applyTenantPlugin(journalEntrySchema);
 
 const Account = mongoose.model('Account', accountSchema);
 const JournalEntry = mongoose.model('JournalEntry', journalEntrySchema);

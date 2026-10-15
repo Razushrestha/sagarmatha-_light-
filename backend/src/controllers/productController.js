@@ -1,6 +1,8 @@
 const Product = require('../models/Product');
+const { assertStorageLimit } = require('../services/planService');
 const Brand = require('../models/Brand');
 const { createAuditLog } = require('../middleware/audit');
+const { tenantKey, cacheGet, cacheSet, invalidateShopCache } = require('../utils/cache');
 const {
   getExportRows,
   buildWorkbook,
@@ -8,14 +10,18 @@ const {
   parseSpreadsheetBuffer,
   importRows,
 } = require('../utils/productSpreadsheet');
+const { scoped, parsePaging, mustBelongToShop } = require('../utils/tenantQuery');
+const { compressProductImage, unlinkQuiet } = require('../utils/imageCompress');
+const path = require('path');
 
 exports.getProducts = async (req, res) => {
   try {
-    const { search, category, brand, page = 1, limit, lowStock } = req.query;
-    const query = { isActive: true };
+    const { search, category, brand, lowStock } = req.query;
+    const { page, limit, skip } = parsePaging(req.query, { defaultLimit: 50, max: 200 });
+    const query = scoped(req, { isActive: true });
 
     if (search) {
-      const matchingBrands = await Brand.find({ name: { $regex: search, $options: 'i' } }).select('_id').lean();
+      const matchingBrands = await Brand.find(scoped(req, { name: { $regex: search, $options: 'i' } })).select('_id').lean();
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { sku: { $regex: search, $options: 'i' } },
@@ -29,33 +35,40 @@ exports.getProducts = async (req, res) => {
       query.$expr = { $lte: ['$currentStock', '$minStock'] };
     }
 
-    const unlimited = limit === '0' || String(limit || '').toLowerCase() === 'all';
-    const take = unlimited ? 0 : Number(limit ?? 20);
-    const pageNum = Number(page) || 1;
-    const skip = take > 0 ? (pageNum - 1) * take : 0;
+    const listKey = !search && lowStock !== 'true'
+      ? tenantKey(['products', 'list', String(category || ''), String(brand || ''), String(page), String(limit)])
+      : null;
+    if (listKey) {
+      const cached = await cacheGet(listKey);
+      if (cached) return res.json(cached);
+    }
 
-    let findQuery = Product.find(query)
+    const findQuery = Product.find(query)
       .populate('category', 'name')
       .populate('brand', 'name')
       .populate('unit', 'name shortName')
       .select('-priceHistory')
-      .sort({ name: 1 });
-    if (take > 0) findQuery = findQuery.skip(skip).limit(take);
+      .sort({ name: 1 })
+      .skip(skip)
+      .limit(limit);
 
     const [products, total] = await Promise.all([
       findQuery.lean(),
       Product.countDocuments(query),
     ]);
 
-    res.json({
+    const payload = {
       success: true,
       data: products,
       pagination: {
         total,
-        page: pageNum,
-        pages: take > 0 ? Math.ceil(total / take) : 1,
+        page,
+        pages: Math.ceil(total / limit) || 1,
+        limit,
       },
-    });
+    };
+    if (listKey) await cacheSet(listKey, payload, 20);
+    res.json(payload);
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -63,12 +76,18 @@ exports.getProducts = async (req, res) => {
 
 exports.getProduct = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
-      .populate('category brand unit purchaseUnit warehouse supplier');
-    if (!product) return res.status(404).json({ success: false, message: 'Product not found.' });
+    const key = tenantKey(['products', 'id', String(req.params.id)]);
+    const cached = await cacheGet(key);
+    if (cached) return res.json({ success: true, data: cached });
+
+    const product = await Product.findOne(scoped(req, { _id: req.params.id }))
+      .populate('category brand unit purchaseUnit warehouse supplier')
+      .lean();
+    mustBelongToShop(product, req, 'Product not found.');
+    await cacheSet(key, product, 60);
     res.json({ success: true, data: product });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -84,6 +103,7 @@ function generateSku(name) {
 exports.createProduct = async (req, res) => {
   try {
     const body = { ...req.body };
+    delete body.tenantId;
     if (!body.sku || !String(body.sku).trim()) {
       body.sku = generateSku(body.name);
     }
@@ -94,6 +114,7 @@ exports.createProduct = async (req, res) => {
       }
     }
     const product = await Product.create(body);
+    await invalidateShopCache(['products', 'dashboard', 'reports']);
     await createAuditLog(req.user._id, 'create', 'product', product._id, null, { name: product.name, sku: product.sku }, req);
     res.status(201).json({ success: true, data: product });
   } catch (error) {
@@ -104,6 +125,7 @@ exports.createProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const body = { ...req.body };
+    delete body.tenantId;
     // Do not clear SKU from the edit form (field removed from UI)
     if (!body.sku || !String(body.sku).trim()) delete body.sku;
     for (const key of ['purchasePrice', 'sellingPrice', 'wholesalePrice', 'dealerPrice', 'projectPrice', 'minSellingPrice', 'vatRate', 'commissionPercent']) {
@@ -114,6 +136,7 @@ exports.updateProduct = async (req, res) => {
     const oldProduct = await Product.findById(req.params.id);
     const product = await Product.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found.' });
+    await invalidateShopCache(['products', 'dashboard']);
     await createAuditLog(req.user._id, 'update', 'product', product._id, { name: oldProduct.name, price: oldProduct.sellingPrice }, { name: product.name, price: product.sellingPrice }, req);
     res.json({ success: true, data: product });
   } catch (error) {
@@ -125,6 +148,7 @@ exports.deleteProduct = async (req, res) => {
   try {
     const product = await Product.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found.' });
+    await invalidateShopCache(['products', 'dashboard']);
     await createAuditLog(req.user._id, 'delete', 'product', product._id, { name: product.name }, null, req);
     res.json({ success: true, message: 'Product deactivated.' });
   } catch (error) {
@@ -134,11 +158,17 @@ exports.deleteProduct = async (req, res) => {
 
 exports.getProductByBarcode = async (req, res) => {
   try {
-    const product = await Product.findOne({
-      $or: [{ barcode: req.params.code }, { sku: req.params.code }],
+    const code = String(req.params.code || '').trim();
+    const key = tenantKey(['products', 'barcode', code.toLowerCase()]);
+    const cached = await cacheGet(key);
+    if (cached) return res.json({ success: true, data: cached });
+
+    const product = await Product.findOne(scoped(req, {
+      $or: [{ barcode: code }, { sku: code }],
       isActive: true,
-    }).populate('category brand unit');
+    })).populate('category brand unit').lean();
     if (!product) return res.status(404).json({ success: false, message: 'Product not found.' });
+    await cacheSet(key, product, 60);
     res.json({ success: true, data: product });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -146,14 +176,39 @@ exports.getProductByBarcode = async (req, res) => {
 };
 
 exports.uploadImage = async (req, res) => {
+  const originalPath = req.file?.path;
+  let compressed = null;
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No image file provided.' });
     }
-    const url = `/uploads/products/${req.file.filename}`;
-    res.json({ success: true, data: { url } });
+
+    const destDir = path.dirname(originalPath);
+    const baseName = path.parse(req.file.filename).name;
+    compressed = await compressProductImage(originalPath, destDir, baseName);
+    unlinkQuiet(originalPath);
+
+    try {
+      await assertStorageLimit(req.tenant, compressed.bytes);
+    } catch (error) {
+      unlinkQuiet(compressed.fullPath);
+      unlinkQuiet(compressed.thumbPath);
+      return res.status(error.statusCode || 403).json({ success: false, message: error.message });
+    }
+
+    const url = `/uploads/tenants/${req.tenantId}/${compressed.fullName}`;
+    const thumb = `/uploads/tenants/${req.tenantId}/${compressed.thumbName}`;
+    res.json({ success: true, data: { url, thumb } });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    unlinkQuiet(originalPath);
+    if (compressed) {
+      unlinkQuiet(compressed.fullPath);
+      unlinkQuiet(compressed.thumbPath);
+    }
+    const message = /unsupported|corrupt|Input file/i.test(error.message)
+      ? 'Could not read that image. Use JPG, PNG, or WEBP.'
+      : error.message;
+    res.status(400).json({ success: false, message });
   }
 };
 
@@ -223,6 +278,7 @@ exports.importProducts = async (req, res) => {
 
     const rawRows = await parseSpreadsheetBuffer(req.file.buffer, req.file.originalname);
     const result = await importRows(rawRows);
+    await invalidateShopCache(['products', 'dashboard']);
     await createAuditLog(
       req.user._id,
       'update',

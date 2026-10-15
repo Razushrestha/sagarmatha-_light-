@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const categorySchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -7,5 +8,7 @@ const categorySchema = new mongoose.Schema({
   image: { type: String },
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });
+
+applyTenantPlugin(categorySchema);
 
 module.exports = mongoose.model('Category', categorySchema);

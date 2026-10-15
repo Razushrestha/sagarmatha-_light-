@@ -80,6 +80,10 @@
     @apply w-full px-3 py-2 text-sm border border-brand-200 rounded-md focus:outline-none focus:ring-2 focus:ring-brand-900/10 focus:border-brand-400 transition-all bg-white text-brand-900 placeholder:text-brand-400;
   }
 
+  .platform-input {
+    @apply w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/15 focus:border-indigo-400;
+  }
+
   .input-field-compact {
     @apply input-field py-1.5 text-sm;
   }

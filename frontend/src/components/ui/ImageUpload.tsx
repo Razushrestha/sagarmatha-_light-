@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { Camera, ImagePlus, SwitchCamera, X } from "lucide-react";
 import { productAPI } from "@/lib/api";
-import { getImageUrl } from "@/lib/utils";
+import { getImageUrl, getThumbUrl } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import toast from "react-hot-toast";
 
@@ -83,8 +83,8 @@ export default function ImageUpload({ images, onChange, maxImages = 4, compact }
           toast.error(`${file.name} is not an image`);
           continue;
         }
-        if (file.size > 5 * 1024 * 1024) {
-          toast.error(`${file.name} exceeds 5MB limit`);
+        if (file.size > 20 * 1024 * 1024) {
+          toast.error(`${file.name} is larger than 20MB`);
           continue;
         }
         const res = await productAPI.uploadImage(file);
@@ -141,7 +141,15 @@ export default function ImageUpload({ images, onChange, maxImages = 4, compact }
         {images.map((img, i) => (
           <div key={`${img}-${i}`} className={cn("relative rounded-md border border-brand-200 overflow-hidden bg-brand-50", sizeClass)}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={getImageUrl(img)} alt={`Product ${i + 1}`} className="w-full h-full object-cover" />
+            <img
+              src={getThumbUrl(img)}
+              alt={`Product ${i + 1}`}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = getImageUrl(img);
+              }}
+            />
             <button
               type="button"
               onClick={() => removeImage(i)}
@@ -248,7 +256,7 @@ export default function ImageUpload({ images, onChange, maxImages = 4, compact }
       )}
 
       {!compact && (
-        <p className="text-[11px] text-brand-400 mt-1.5">Camera or gallery · JPG, PNG, WEBP · Max 5MB · Up to {maxImages}</p>
+        <p className="text-[11px] text-brand-400 mt-1.5">Camera or gallery · any size up to 20MB · compressed on the server · up to {maxImages}</p>
       )}
     </div>
   );

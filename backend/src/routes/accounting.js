@@ -1,10 +1,10 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireShopTenant } = require('../middleware/auth');
 const accountingController = require('../controllers/accountingController');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, requireShopTenant);
 
 router.get('/accounts', authorize('accounting:read', 'purchase:read'), accountingController.getAccounts);
 router.get('/journal', authorize('accounting:read'), accountingController.getJournalEntries);
@@ -16,5 +16,7 @@ router.post('/expenses', authorize('accounting:write'), accountingController.cre
 router.put('/expenses/:id', authorize('accounting:write'), accountingController.updateExpense);
 router.delete('/expenses/:id', authorize('accounting:write'), accountingController.deleteExpense);
 router.get('/reports', authorize('reports:view', 'accounting:read'), accountingController.getReports);
+router.post('/reports/jobs', authorize('reports:view', 'accounting:read'), accountingController.enqueueReport);
+router.get('/reports/jobs/:jobId', authorize('reports:view', 'accounting:read'), accountingController.getReportJob);
 
 module.exports = router;

@@ -6,11 +6,17 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
-const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const connectDB = require('./config/db');
+const { connectRedis, redisStatus, closeRedis, onRedisReady } = require('./config/redis');
+const { startJobs, closeJobs, jobsStatus } = require('./utils/jobs');
+const { registerJobs } = require('./jobs/register');
+const { apiLimiter } = require('./middleware/rateLimiters');
+const { requestTiming } = require('./middleware/requestTiming');
 const { mountApi } = require('./routes');
 const { assertProductionEnv, corsOrigins, backendPort } = require('./config/env');
+const { cacheHitRate } = require('./utils/metrics');
+const { startHealthWatch, stopHealthWatch, status: healthStatus } = require('./utils/healthWatch');
 
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -46,6 +52,7 @@ app.use(cors({
   credentials: true,
 }));
 
+app.use(requestTiming);
 app.use(morgan(isProd ? 'combined' : 'dev', {
   skip: (req) => req.path === '/api/health',
 }));
@@ -64,33 +71,19 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {
   etag: true,
 }));
 
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: Number(process.env.RATE_LIMIT_MAX || (isProd ? 800 : 2000)),
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use('/api/', apiLimiter);
-
 app.get('/api/health', (req, res) => {
+  const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
   res.json({
     success: true,
-    message: 'Sagarmatha Light Solution ERP API is running',
+    message: 'Nepatronix ERP API is running',
     version: '1.0.0',
     env: isProd ? 'production' : 'development',
-  });
-});
-
-mountApi(app);
-
-app.use((err, req, res, next) => {
-  if (err && err.message === 'Not allowed by CORS') {
-    return res.status(403).json({ success: false, message: 'Origin not allowed.' });
-  }
-  console.error(isProd ? err.message : err.stack);
-  res.status(500).json({
-    success: false,
-    message: isProd ? 'Internal server error' : (err.message || 'Internal server error'),
+    mongo: 'connected',
+    redis: redisStatus(),
+    jobs: jobsStatus(),
+    cacheHitRate: cacheHitRate(),
+    rssMb,
+    alerts: healthStatus(),
   });
 });
 
@@ -99,14 +92,42 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 async function start() {
   await connectDB();
+  try {
+    await require('./services/platformSettings').loadPlatformSettings();
+  } catch (error) {
+    console.warn(`Platform settings: ${error.message}`);
+  }
+  await connectRedis();
+  registerJobs();
+  await startJobs();
+  onRedisReady(() => startJobs());
+
+  app.use('/api/', apiLimiter(isProd));
+  mountApi(app);
+
+  app.use((err, req, res, next) => {
+    if (err && err.message === 'Not allowed by CORS') {
+      return res.status(403).json({ success: false, message: 'Origin not allowed.' });
+    }
+    console.error(isProd ? err.message : err.stack);
+    res.status(500).json({
+      success: false,
+      message: isProd ? 'Internal server error' : (err.message || 'Internal server error'),
+    });
+  });
+
   const server = app.listen(PORT, HOST, () => {
     console.log(`API listening on ${HOST}:${PORT} (${isProd ? 'production' : 'development'})`);
+    startHealthWatch();
   });
 
   const shutdown = async (signal) => {
     console.log(`${signal} received. Closing server...`);
     server.close(async () => {
       try {
+        stopHealthWatch();
+        await closeJobs();
+        await closeRedis();
         const mongoose = require('mongoose');
         await mongoose.connection.close();
       } catch {

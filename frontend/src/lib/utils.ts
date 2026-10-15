@@ -28,3 +28,14 @@ export function getImageUrl(path: string): string {
   if (path.startsWith("http")) return path;
   return `${API_BASE}${path}`;
 }
+
+export function thumbPath(path: string): string {
+  if (!path) return "";
+  if (path.includes("-thumb.")) return path;
+  if (/\.webp$/i.test(path)) return path.replace(/\.webp$/i, "-thumb.webp");
+  return path;
+}
+
+export function getThumbUrl(path: string): string {
+  return getImageUrl(thumbPath(path));
+}

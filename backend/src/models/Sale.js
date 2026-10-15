@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const saleItemSchema = new mongoose.Schema({
   product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
@@ -33,7 +34,7 @@ const paymentSchema = new mongoose.Schema({
 });
 
 const saleSchema = new mongoose.Schema({
-  invoiceNumber: { type: String, required: true, unique: true },
+  invoiceNumber: { type: String, required: true },
   type: { type: String, enum: ['invoice', 'estimate', 'quotation', 'order'], default: 'invoice' },
   status: {
     type: String,
@@ -78,5 +79,11 @@ saleSchema.index({ type: 1, status: 1, createdAt: -1 });
 saleSchema.index({ customer: 1, type: 1, isHeld: 1 });
 saleSchema.index({ createdAt: -1 });
 saleSchema.index({ electrician: 1, createdAt: -1 });
+
+applyTenantPlugin(saleSchema, { uniqueFields: ['invoiceNumber'] });
+saleSchema.index({ tenantId: 1, type: 1, isHeld: 1, createdAt: -1 });
+saleSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+saleSchema.index({ tenantId: 1, customer: 1, createdAt: -1 });
+saleSchema.index({ tenantId: 1, electrician: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Sale', saleSchema);

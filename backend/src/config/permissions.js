@@ -36,9 +36,15 @@ const PERMISSIONS = {
 };
 
 const DEFAULT_ROLES = {
+  platform_admin: {
+    name: 'Platform Admin',
+    description: 'Nepatronix SaaS operator — tenants only, not shop POS',
+    permissions: [],
+    landingPage: '/platform',
+  },
   super_admin: {
     name: 'Super Admin',
-    description: 'Full system access',
+    description: 'Full shop access',
     permissions: Object.keys(PERMISSIONS),
     landingPage: '/dashboard',
   },

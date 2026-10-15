@@ -1,8 +1,8 @@
-const mongoose = require('mongoose');
-const Product = require('../models/Product');
-const { StockMovement } = require('../models/Warehouse');
 const { createAuditLog } = require('../middleware/audit');
-const { withOptionalTransaction, sessionQuery, sessionOpts } = require('../utils/mongoTransaction');
+const { withOptionalTransaction } = require('../utils/mongoTransaction');
+const { invalidateShopCache } = require('../utils/cache');
+const { changeStock } = require('../utils/stock');
+const { parsePaging, scoped } = require('../utils/tenantQuery');
 
 exports.adjustStock = async (req, res) => {
   try {
@@ -13,41 +13,32 @@ exports.adjustStock = async (req, res) => {
     }
 
     const result = await withOptionalTransaction(async (session) => {
-      const product = await sessionQuery(Product.findById(productId), session);
-      if (!product) throw new Error('Product not found.');
-
       const movementType = type === 'add' ? 'adjustment_plus' : 'adjustment_minus';
       const qtyChange = type === 'add' ? Math.abs(quantity) : -Math.abs(quantity);
+      const refNum = `ADJ-${Date.now()}`;
 
-      if (type === 'remove' && product.currentStock < Math.abs(quantity)) {
-        throw new Error('Insufficient stock for adjustment.');
-      }
-
-      product.currentStock += qtyChange;
-      await product.save(sessionOpts(session));
-
-      const refNum = `ADJ-${String(await StockMovement.countDocuments() + 1).padStart(5, '0')}`;
-
-      await StockMovement.create([{
-        product: productId,
-        warehouse: warehouseId,
+      const product = await changeStock({
+        productId,
+        productName: 'item',
+        delta: qtyChange,
+        session,
+        warehouseId,
         type: movementType,
-        quantity: qtyChange,
-        balanceAfter: product.currentStock,
         reference: refNum,
+        userId: req.user._id,
         notes: reason,
-        createdBy: req.user._id,
-      }], sessionOpts(session));
+      });
 
       await createAuditLog(req.user._id, 'stock_adjust', 'product', productId, null, { qtyChange, reason }, req);
 
       return { product, reference: refNum };
     });
 
+    await invalidateShopCache(['products', 'dashboard', 'reports']);
     res.json({ success: true, data: result });
   } catch (error) {
-    const status = error.message === 'Product not found.' ? 404
-      : error.message === 'Insufficient stock for adjustment.' ? 400
+    const status = /not found/i.test(error.message) ? 404
+      : /Insufficient stock/i.test(error.message) ? 400
         : 500;
     res.status(status).json({ success: false, message: error.message });
   }
@@ -66,7 +57,8 @@ exports.createWarehouse = async (req, res) => {
 exports.markNotificationRead = async (req, res) => {
   try {
     const Notification = require('../models/Notification');
-    await Notification.findByIdAndUpdate(req.params.id, { isRead: true });
+    const row = await Notification.findByIdAndUpdate(req.params.id, { isRead: true });
+    if (!row) return res.status(404).json({ success: false, message: 'Notification not found.' });
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -86,13 +78,13 @@ exports.markAllNotificationsRead = async (req, res) => {
 exports.getAuditLogs = async (req, res) => {
   try {
     const AuditLog = require('../models/AuditLog');
-    const { page = 1, limit = 50 } = req.query;
-    const skip = (page - 1) * limit;
+    const { page, limit, skip } = parsePaging(req.query, { defaultLimit: 50 });
+    const filter = scoped(req);
     const [logs, total] = await Promise.all([
-      AuditLog.find().populate('user', 'name email').sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
-      AuditLog.countDocuments(),
+      AuditLog.find(filter).populate('user', 'name email').sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      AuditLog.countDocuments(filter),
     ]);
-    res.json({ success: true, data: logs, pagination: { total, page: Number(page) } });
+    res.json({ success: true, data: logs, pagination: { total, page, pages: Math.ceil(total / limit) } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

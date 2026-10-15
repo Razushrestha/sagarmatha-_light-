@@ -299,7 +299,6 @@ export default function InvoicePrintPage() {
       )}
 
       <div className="max-w-3xl mx-auto bg-white shadow-lg print:shadow-none p-8 print:p-6" id="invoice">
-        {/* Header */}
         <div className="border-b-2 border-brand-800 pb-4 mb-6">
           <div className="flex justify-between items-start">
             <div>
@@ -336,7 +335,6 @@ export default function InvoicePrintPage() {
           </div>
         </div>
 
-        {/* Customer */}
         <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
           <div>
             <p className="font-semibold text-brand-800 mb-1">Bill To:</p>
@@ -357,7 +355,6 @@ export default function InvoicePrintPage() {
           </div>
         </div>
 
-        {/* Items */}
         <table className="w-full text-sm mb-6">
           <thead>
             <tr className="bg-brand-800 text-white">
@@ -384,7 +381,6 @@ export default function InvoicePrintPage() {
           </tbody>
         </table>
 
-        {/* Totals */}
         <div className="flex justify-end mb-6">
           <div className="w-64 space-y-1 text-sm">
             <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(sale.subtotal)}</span></div>
@@ -412,7 +408,6 @@ export default function InvoicePrintPage() {
           </div>
         </div>
 
-        {/* Payments */}
         {sale.payments?.length > 0 && (
           <div className="mb-6 text-sm">
             <p className="font-semibold text-brand-800 mb-2">Payment Details:</p>
@@ -424,7 +419,6 @@ export default function InvoicePrintPage() {
           </div>
         )}
 
-        {/* Footer */}
         <div className="border-t pt-4 text-xs text-gray-500 space-y-2">
           {settings.termsAndConditions && <p><strong>Terms:</strong> {settings.termsAndConditions}</p>}
           <p>{settings.footerText || "Thank you for your business!"}</p>

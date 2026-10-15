@@ -22,3 +22,9 @@ Thumbs.db
 # uploads (keep folder, ignore files)
 backend/uploads/products/*
 !backend/uploads/products/.gitkeep
+
+# mongo dumps
+backend/backups/
+
+# local ops watchdog state
+backend/.alert-state.json

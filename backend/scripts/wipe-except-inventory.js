@@ -15,6 +15,7 @@ const KEEP = new Set([
   'roles',
   'settings',
   'accounts',
+  'tenants',
 ]);
 
 (async () => {

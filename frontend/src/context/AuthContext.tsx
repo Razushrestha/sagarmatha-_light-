@@ -10,12 +10,29 @@ interface User {
   role: string;
   permissions: string[];
   landingPage: string;
+  tenantId?: string | null;
+  tenantName?: string | null;
+  tenantStatus?: string | null;
+  companyName?: string | null;
+  mustChangePassword?: boolean;
+  impersonating?: boolean;
+  impersonatingUntil?: number | null;
+  subscription?: {
+    plan: string;
+    status: string;
+    trialEndsAt?: string | null;
+    trialExpired?: boolean;
+    limits: { users: number; storageGb: number };
+    usage: { users: number; storageBytes: number };
+    storageOptionsGb?: number[];
+  } | null;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<string>;
+  acceptSession: (data: User) => string;
   logout: () => Promise<void>;
   hasPermission: (...perms: string[]) => boolean;
   refreshUser: () => Promise<void>;
@@ -44,12 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
+  const acceptSession = (data: User) => {
+    requestId.current += 1;
+    setUser(data);
+    setLoading(false);
+    return data.landingPage || "/dashboard";
+  };
+
   const login = async (email: string, password: string) => {
     const res = await authAPI.login({ email, password });
-    requestId.current += 1;
-    setUser(res.data.data);
-    setLoading(false);
-    return res.data.data.landingPage;
+    return acceptSession(res.data.data);
   };
 
   const logout = async () => {
@@ -65,12 +86,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hasPermission = (...perms: string[]) => {
     if (!user) return false;
+    if (user.role === "platform_admin") return user.impersonating === true;
     if (user.role === "super_admin") return true;
     return perms.some((p) => user.permissions.includes(p));
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, hasPermission, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, acceptSession, logout, hasPermission, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

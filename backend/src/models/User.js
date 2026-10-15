@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -8,24 +9,31 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, trim: true },
   role: {
     type: String,
-    enum: ['super_admin', 'admin', 'sales_staff', 'receptionist', 'accountant', 'storekeeper', 'custom'],
+    enum: ['platform_admin', 'super_admin', 'admin', 'sales_staff', 'receptionist', 'accountant', 'storekeeper', 'custom'],
     default: 'sales_staff',
   },
   customRole: { type: mongoose.Schema.Types.ObjectId, ref: 'Role' },
   permissions: [{ type: String }],
   avatar: { type: String },
   isActive: { type: Boolean, default: true },
+  mustChangePassword: { type: Boolean, default: false },
   twoFactorEnabled: { type: Boolean, default: false },
   twoFactorSecret: { type: String, select: false },
   failedLoginAttempts: { type: Number, default: 0 },
   lockUntil: { type: Date },
   lastLogin: { type: Date },
+  inviteTokenHash: { type: String, select: false },
+  inviteExpiresAt: { type: Date },
   loginHistory: [{
     ip: String,
     device: String,
     timestamp: { type: Date, default: Date.now },
   }],
 }, { timestamps: true });
+
+applyTenantPlugin(userSchema);
+userSchema.index({ tenantId: 1, isActive: 1, role: 1 });
+userSchema.index({ inviteTokenHash: 1 }, { unique: true, sparse: true });
 
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;

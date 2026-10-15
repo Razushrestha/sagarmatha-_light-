@@ -1,12 +1,23 @@
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { tenantUploadDir } = require('../utils/storageUsage');
+const { assertStorageLimit } = require('../services/planService');
 
-const uploadDir = path.join(__dirname, '../../uploads/products');
-fs.mkdirSync(uploadDir, { recursive: true });
+function ensureTenantDir(req) {
+  const dir = tenantUploadDir(req.tenantId);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
+  destination: (req, _file, cb) => {
+    try {
+      cb(null, ensureTenantDir(req));
+    } catch (err) {
+      cb(err);
+    }
+  },
   filename: (_req, file, cb) => {
     const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
@@ -22,7 +33,7 @@ const fileFilter = (_req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 },
 });
 
 const spreadsheetUpload = multer({
@@ -36,4 +47,23 @@ const spreadsheetUpload = multer({
   limits: { fileSize: 8 * 1024 * 1024 },
 });
 
-module.exports = { upload, spreadsheetUpload };
+async function enforceStorageQuota(req, res, next) {
+  try {
+    if (!req.tenant) return next();
+    const incoming = Number(req.headers['content-length'] || 0);
+    await assertStorageLimit(req.tenant, incoming);
+    next();
+  } catch (error) {
+    return res.status(error.statusCode || 403).json({ success: false, message: error.message });
+  }
+}
+
+function handleUploadError(err, req, res, next) {
+  if (!err) return next();
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ success: false, message: 'Image is larger than 20MB.' });
+  }
+  return res.status(400).json({ success: false, message: err.message || 'Upload failed.' });
+}
+
+module.exports = { upload, spreadsheetUpload, enforceStorageQuota, handleUploadError };

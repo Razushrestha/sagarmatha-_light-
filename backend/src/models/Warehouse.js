@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const warehouseSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
-  code: { type: String, required: true, unique: true, trim: true },
+  code: { type: String, required: true, trim: true },
   address: { type: String },
   phone: { type: String },
   manager: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -28,6 +29,11 @@ const stockMovementSchema = new mongoose.Schema({
 
 stockMovementSchema.index({ createdAt: -1 });
 stockMovementSchema.index({ product: 1, createdAt: -1 });
+
+applyTenantPlugin(warehouseSchema, { uniqueFields: ['code'] });
+applyTenantPlugin(stockMovementSchema);
+stockMovementSchema.index({ tenantId: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, product: 1, createdAt: -1 });
 
 const Warehouse = mongoose.model('Warehouse', warehouseSchema);
 const StockMovement = mongoose.model('StockMovement', stockMovementSchema);

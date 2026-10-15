@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const supplierSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -18,5 +19,9 @@ const supplierSchema = new mongoose.Schema({
   notes: { type: String },
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });
+
+applyTenantPlugin(supplierSchema);
+supplierSchema.index({ tenantId: 1, isActive: 1, name: 1 });
+supplierSchema.index({ tenantId: 1, outstanding: -1 });
 
 module.exports = mongoose.model('Supplier', supplierSchema);

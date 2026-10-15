@@ -140,6 +140,11 @@ exports.getPurchase = async (req, res) => {
 
 exports.createPurchase = async (req, res) => {
   try {
+    const { scoped, mustBelongToShop } = require('../utils/tenantQuery');
+    if (req.body.supplier) {
+      const supplier = await Supplier.findOne(scoped(req, { _id: req.body.supplier })).lean();
+      mustBelongToShop(supplier, req, 'Supplier not found.');
+    }
     const isOrder = req.body.type === 'order';
     const count = await Purchase.countDocuments({ type: isOrder ? 'order' : 'invoice' });
     const prefix = isOrder ? 'POR' : 'PUR';
@@ -174,7 +179,7 @@ exports.createPurchase = async (req, res) => {
     const populated = await Purchase.findById(purchase._id).populate('supplier', 'name');
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 

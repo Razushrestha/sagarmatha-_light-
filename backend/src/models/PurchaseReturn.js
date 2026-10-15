@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const returnItemSchema = new mongoose.Schema({
   product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
@@ -9,7 +10,7 @@ const returnItemSchema = new mongoose.Schema({
 });
 
 const purchaseReturnSchema = new mongoose.Schema({
-  returnNumber: { type: String, required: true, unique: true },
+  returnNumber: { type: String, required: true },
   originalPurchase: { type: mongoose.Schema.Types.ObjectId, ref: 'Purchase', required: true },
   supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
   items: [returnItemSchema],
@@ -21,5 +22,7 @@ const purchaseReturnSchema = new mongoose.Schema({
   warehouse: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 }, { timestamps: true });
+
+applyTenantPlugin(purchaseReturnSchema, { uniqueFields: ['returnNumber'] });
 
 module.exports = mongoose.model('PurchaseReturn', purchaseReturnSchema);

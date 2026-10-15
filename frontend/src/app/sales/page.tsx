@@ -34,6 +34,9 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ListFilter>("all");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [editingSale, setEditingSale] = useState<SaleForEdit | null>(null);
   const [saving, setSaving] = useState(false);
   const [products, setProducts] = useState<Array<{ _id: string; name: string; sellingPrice: number }>>([]);
@@ -47,15 +50,22 @@ export default function SalesPage() {
       const res = await saleAPI.getAll({
         type,
         limit: "50",
+        page: String(page),
         search: debouncedSearch,
       });
       setSales(res.data.data || []);
+      setPages(res.data.pagination?.pages || 1);
+      setTotal(res.data.pagination?.total || 0);
     } catch (err: unknown) {
       const e = err as { response?: { data?: { message?: string } } };
       toast.error(e.response?.data?.message || "Failed to load sales");
     } finally {
       setLoading(false);
     }
+  }, [filter, debouncedSearch, page]);
+
+  useEffect(() => {
+    setPage(1);
   }, [filter, debouncedSearch]);
 
   useEffect(() => {
@@ -244,6 +254,16 @@ export default function SalesPage() {
             )}
           </tbody>
         </table>
+        {pages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-brand-100 text-sm text-gray-600">
+            <span>{total} invoices</span>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary py-1 px-3" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</button>
+              <span className="py-1">Page {page} of {pages}</span>
+              <button type="button" className="btn-secondary py-1 px-3" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <Modal open={!!editingSale} onClose={() => setEditingSale(null)} size="3xl" hideHeader>

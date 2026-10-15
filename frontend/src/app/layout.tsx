@@ -4,7 +4,7 @@ import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "@/context/AuthContext";
 import { CalendarProvider } from "@/context/CalendarContext";
 import "./globals.css";
-import { COMPANY } from "@/lib/company";
+import { PRODUCT } from "@/lib/company";
 
 const inter = localFont({
   src: "../fonts/inter-latin-variable.woff2",
@@ -14,8 +14,8 @@ const inter = localFont({
 });
 
 export const metadata: Metadata = {
-  title: `${COMPANY.name} - ERP`,
-  description: `Complete ERP system for ${COMPANY.name} - Nepal IRD VAT Compliant`,
+  title: `${PRODUCT.name}`,
+  description: `${PRODUCT.name} — Nepal IRD VAT compliant POS, inventory and accounting.`,
 };
 
 export const viewport: Viewport = {

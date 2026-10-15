@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const electricianSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -17,5 +18,9 @@ const electricianSchema = new mongoose.Schema({
 
 electricianSchema.index({ name: 1 });
 electricianSchema.index({ number1: 1 });
+
+applyTenantPlugin(electricianSchema);
+electricianSchema.index({ tenantId: 1, isActive: 1, name: 1 });
+electricianSchema.index({ tenantId: 1, number1: 1 });
 
 module.exports = mongoose.model('Electrician', electricianSchema);

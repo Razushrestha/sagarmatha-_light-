@@ -8,6 +8,7 @@ const {
   normalizeSalePaymentFields,
   ensureSaleReturnStoreCredits,
 } = require('../utils/salePayments');
+const { scoped, scopedMatch, parsePaging, mustBelongToShop } = require('../utils/tenantQuery');
 
 function mapDebtor(customer) {
   const doc = customer.toObject ? customer.toObject() : customer;
@@ -20,8 +21,9 @@ function mapDebtor(customer) {
 
 exports.getCustomers = async (req, res) => {
   try {
-    const { search, page = 1, limit = 20 } = req.query;
-    const query = { isActive: true };
+    const { search } = req.query;
+    const { page, limit, skip } = parsePaging(req.query, { defaultLimit: 50, max: 200 });
+    const query = scoped(req, { isActive: true });
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
@@ -30,16 +32,15 @@ exports.getCustomers = async (req, res) => {
       ];
     }
 
-    const skip = (page - 1) * limit;
     const [customers, total] = await Promise.all([
-      Customer.find(query).sort({ name: 1 }).skip(skip).limit(Number(limit)).lean(),
+      Customer.find(query).sort({ name: 1 }).skip(skip).limit(limit).lean(),
       Customer.countDocuments(query),
     ]);
 
     res.json({
       success: true,
       data: customers.map(mapDebtor),
-      pagination: { total, page: Number(page), pages: Math.ceil(total / limit) },
+      pagination: { total, page, pages: Math.ceil(total / limit) || 1, limit },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -48,11 +49,11 @@ exports.getCustomers = async (req, res) => {
 
 exports.getCustomer = async (req, res) => {
   try {
-    const customer = await Customer.findById(req.params.id);
-    if (!customer) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    const customer = await Customer.findOne(scoped(req, { _id: req.params.id })).lean();
+    mustBelongToShop(customer, req, 'Customer not found.');
     res.json({ success: true, data: mapDebtor(customer) });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -138,24 +139,27 @@ exports.deleteCustomer = async (req, res) => {
 
 exports.getDebtors = async (req, res) => {
   try {
-    const debtors = await Customer.find({ isActive: true, outstanding: { $gt: 0 } })
+    const debtors = await Customer.find(scoped(req, { isActive: true, outstanding: { $gt: 0 } }))
       .select('name phone company customerType outstanding creditBalance creditLimit totalPurchases totalPaid')
       .sort({ outstanding: -1 })
+      .limit(200)
       .lean();
 
     // Fallback: include customers with unpaid invoices even if balance sync lagged
     if (debtors.length === 0) {
       const unpaid = await Sale.aggregate([
-        { $match: { type: { $in: ['invoice', 'estimate'] }, amountDue: { $gt: 0 }, customer: { $ne: null }, isHeld: { $ne: true } } },
+        scopedMatch(req, { type: { $in: ['invoice', 'estimate'] }, amountDue: { $gt: 0 }, customer: { $ne: null }, isHeld: { $ne: true } }),
         { $group: { _id: '$customer', debtAmount: { $sum: '$amountDue' } } },
       ]);
       if (unpaid.length > 0) {
         for (const row of unpaid) {
           await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, row._id);
         }
-        const retried = await Customer.find({ isActive: true, outstanding: { $gt: 0 } })
+        const retried = await Customer.find(scoped(req, { isActive: true, outstanding: { $gt: 0 } }))
           .select('name phone company customerType outstanding creditBalance creditLimit totalPurchases totalPaid')
-          .sort({ outstanding: -1 });
+          .sort({ outstanding: -1 })
+          .limit(200)
+          .lean();
         return res.json({ success: true, data: retried.map(mapDebtor) });
       }
     }

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const customerSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -26,5 +27,11 @@ const customerSchema = new mongoose.Schema({
 customerSchema.index({ name: 'text', phone: 'text', company: 'text' });
 customerSchema.index({ isActive: 1, outstanding: -1 });
 customerSchema.index({ isActive: 1, creditBalance: -1 });
+
+applyTenantPlugin(customerSchema);
+customerSchema.index({ tenantId: 1, isActive: 1, name: 1 });
+customerSchema.index({ tenantId: 1, phone: 1 });
+customerSchema.index({ tenantId: 1, isActive: 1, outstanding: -1 });
+customerSchema.index({ tenantId: 1, isActive: 1, creditBalance: -1 });
 
 module.exports = mongoose.model('Customer', customerSchema);

@@ -2,13 +2,19 @@ const mongoose = require('mongoose');
 const { ensureDefaultWarehouse } = require('../utils/warehouse');
 const { reconcileAllDebtors } = require('../utils/salePayments');
 const { mongoUri } = require('./env');
+const { installMongoMonitor } = require('../utils/mongoMonitor');
+
+installMongoMonitor();
 
 const connectDB = async () => {
   try {
     const uri = mongoUri();
     const conn = await mongoose.connect(uri, {
       maxPoolSize: Number(process.env.MONGO_POOL_SIZE || 20),
+      minPoolSize: Number(process.env.MONGO_MIN_POOL || 0),
+      maxIdleTimeMS: 30000,
       serverSelectionTimeoutMS: 8000,
+      readPreference: process.env.MONGO_READ_PREFERENCE || 'primary',
     });
     const port = conn.connection.port || Number(process.env.MONGODB_PORT || 27017);
     console.log(`MongoDB connected on port ${port} (${conn.connection.host}/${conn.connection.name})`);

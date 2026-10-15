@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import { productAPI } from "@/lib/api";
-import { formatCurrency, cn, getImageUrl } from "@/lib/utils";
+import { formatCurrency, cn, getImageUrl, getThumbUrl } from "@/lib/utils";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { isAltN, useHotkey } from "@/lib/useHotkey";
 import { Plus, Search, Package, AlertTriangle, Pencil, Trash2, Upload, Download } from "lucide-react";
@@ -43,6 +43,9 @@ export default function ProductsPage() {
   const router = useRouter();
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState<"csv" | "xlsx" | null>(null);
@@ -51,23 +54,35 @@ export default function ProductsPage() {
 
   const loadProducts = () => {
     setLoading(true);
-    return productAPI.getAll({ search: debouncedSearch })
-      .then((res) => setProducts(res.data.data))
+    return productAPI.getAll({ search: debouncedSearch, page: String(page), limit: "50" })
+      .then((res) => {
+        setProducts(res.data.data);
+        setPages(res.data.pagination?.pages || 1);
+        setTotal(res.data.pagination?.total || 0);
+      })
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    productAPI.getAll({ search: debouncedSearch })
+    productAPI.getAll({ search: debouncedSearch, page: String(page), limit: "50" })
       .then((res) => {
-        if (!cancelled) setProducts(res.data.data);
+        if (!cancelled) {
+          setProducts(res.data.data);
+          setPages(res.data.pagination?.pages || 1);
+          setTotal(res.data.pagination?.total || 0);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [debouncedSearch]);
+  }, [debouncedSearch, page]);
 
   const handleExport = async (format: "csv" | "xlsx") => {
     setExporting(format);
@@ -213,17 +228,23 @@ export default function ProductsPage() {
                   </td>
                 </tr>
               ) : (
-                products.map((product) => (
+                products.map((product) => {
+                  const thumb = product.images?.[0];
+                  return (
                   <tr key={product._id} className="hover:bg-brand-50/50 transition-colors">
                     <td className="table-cell">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-brand-50 border border-brand-100 overflow-hidden flex items-center justify-center shrink-0">
-                          {product.images?.[0] ? (
+                          {thumb ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
-                              src={getImageUrl(product.images[0])}
+                              src={getThumbUrl(thumb)}
                               alt={product.name}
                               className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.src = getImageUrl(thumb);
+                              }}
                             />
                           ) : (
                             <Package className="w-5 h-5 text-brand-400" />
@@ -259,11 +280,22 @@ export default function ProductsPage() {
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
+        {pages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-brand-100 text-sm text-gray-600">
+            <span>{total} products</span>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary py-1 px-3" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</button>
+              <span className="py-1">Page {page} of {pages}</span>
+              <button type="button" className="btn-secondary py-1 px-3" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+            </div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

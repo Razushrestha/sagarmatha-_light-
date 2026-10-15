@@ -1,10 +1,10 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireShopTenant } = require('../middleware/auth');
 const miscController = require('../controllers/miscController');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, requireShopTenant);
 
 router.get('/categories', miscController.getCategories);
 router.post('/categories', authorize('product:create'), miscController.createCategory);

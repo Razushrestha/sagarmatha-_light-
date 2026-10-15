@@ -8,6 +8,8 @@ const { normalizeSalePaymentFields, hasCreditPayment, reconcileCustomerOutstandi
 const { getDefaultWarehouseId } = require('../utils/warehouse');
 const { applyCommissionToSaleBody } = require('../utils/electricianCommission');
 const { allocateReturnLines, round2 } = require('../utils/saleReturn');
+const { tenantKey, cacheGet, cacheSet, invalidateShopCache } = require('../utils/cache');
+const { scoped, scopedMatch, parsePaging, mustBelongToShop } = require('../utils/tenantQuery');
 
 function saleWasPosted(sale) {
   return ['invoice', 'estimate'].includes(sale.type) && sale.status === 'completed' && !sale.isHeld;
@@ -40,8 +42,9 @@ const generateNumber = async (prefix) => {
 
 exports.getSales = async (req, res) => {
   try {
-    const { type, status, page = 1, limit = 50, startDate, endDate, search, includeHeld } = req.query;
-    const query = {};
+    const { type, status, startDate, endDate, search, includeHeld } = req.query;
+    const { page, limit, skip } = parsePaging(req.query, { defaultLimit: 50, max: 200 });
+    const query = scoped(req);
     if (type) {
       const types = String(type).split(',').map((t) => t.trim()).filter(Boolean);
       query.type = types.length > 1 ? { $in: types } : types[0];
@@ -68,7 +71,6 @@ exports.getSales = async (req, res) => {
       }
     }
 
-    const skip = (Number(page) - 1) * Number(limit);
     const [sales, total] = await Promise.all([
       Sale.find(query)
         .select("invoiceNumber type customer customerName customerPhone total amountPaid amountDue status createdAt createdBy validityDate returnedTotal returnedCommission refundedAmount electrician")
@@ -76,12 +78,12 @@ exports.getSales = async (req, res) => {
         .populate('createdBy', 'name')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(Number(limit))
+        .limit(limit)
         .lean(),
       Sale.countDocuments(query),
     ]);
 
-    res.json({ success: true, data: sales, pagination: { total, page: Number(page), pages: Math.ceil(total / Number(limit)) } });
+    res.json({ success: true, data: sales, pagination: { total, page, pages: Math.ceil(total / limit) || 1, limit } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -89,14 +91,15 @@ exports.getSales = async (req, res) => {
 
 exports.getSale = async (req, res) => {
   try {
-    const sale = await Sale.findById(req.params.id)
+    const sale = await Sale.findOne(scoped(req, { _id: req.params.id }))
       .populate('customer')
       .populate('items.product')
-      .populate('createdBy', 'name');
-    if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
+      .populate('createdBy', 'name')
+      .lean();
+    mustBelongToShop(sale, req, 'Sale not found.');
     res.json({ success: true, data: sale });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -165,15 +168,16 @@ exports.createSale = async (req, res) => {
     }
 
     const populated = await Sale.findById(sale._id).populate('customer', 'name phone address').populate('createdBy', 'name');
+    await invalidateShopCache(['dashboard', 'products', 'reports']);
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
 exports.getHeldSales = async (req, res) => {
   try {
-    const held = await Sale.find({ isHeld: true })
+    const held = await Sale.find(scoped(req, { isHeld: true }))
       .populate('customer', 'name phone')
       .sort({ heldAt: -1 })
       .lean();
@@ -185,7 +189,7 @@ exports.getHeldSales = async (req, res) => {
 
 exports.updateSale = async (req, res) => {
   try {
-    const sale = await Sale.findById(req.params.id);
+    const sale = await Sale.findOne(scoped(req, { _id: req.params.id }));
     if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
     if (['cancelled', 'returned', 'partial_return'].includes(sale.status)) {
       return res.status(400).json({ success: false, message: 'Returned or cancelled sales cannot be edited.' });
@@ -259,6 +263,7 @@ exports.updateSale = async (req, res) => {
     const populated = await Sale.findById(sale._id)
       .populate('customer', 'name phone address')
       .populate('createdBy', 'name');
+    await invalidateShopCache(['dashboard', 'products', 'reports']);
     res.json({ success: true, data: populated });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -267,7 +272,7 @@ exports.updateSale = async (req, res) => {
 
 exports.deleteSale = async (req, res) => {
   try {
-    const sale = await Sale.findById(req.params.id);
+    const sale = await Sale.findOne(scoped(req, { _id: req.params.id }));
     if (!sale) return res.status(404).json({ success: false, message: 'Sale not found.' });
     if (sale.status === 'cancelled') {
       return res.status(400).json({ success: false, message: 'Sale is already cancelled.' });
@@ -289,6 +294,7 @@ exports.deleteSale = async (req, res) => {
       await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, previousCustomerId);
     }
 
+    await invalidateShopCache(['dashboard', 'products', 'reports']);
     res.json({ success: true, message: 'Sale deleted.' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -297,7 +303,7 @@ exports.deleteSale = async (req, res) => {
 
 exports.completeHeldSale = async (req, res) => {
   try {
-    const sale = await Sale.findById(req.params.id);
+    const sale = await Sale.findOne(scoped(req, { _id: req.params.id }));
     if (!sale || !sale.isHeld) return res.status(404).json({ success: false, message: 'Held sale not found.' });
 
     await applyCommissionToSaleBody(req.body);
@@ -309,15 +315,16 @@ exports.completeHeldSale = async (req, res) => {
       await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, sale.customer);
     }
     const populated = await Sale.findById(sale._id).populate('customer', 'name phone');
+    await invalidateShopCache(['dashboard', 'products', 'reports']);
     res.json({ success: true, data: populated });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
 exports.convertToSale = async (req, res) => {
   try {
-    const source = await Sale.findById(req.params.id);
+    const source = await Sale.findOne(scoped(req, { _id: req.params.id }));
     if (!source) return res.status(404).json({ success: false, message: 'Document not found.' });
     if (!['quotation', 'estimate'].includes(source.type)) {
       return res.status(400).json({ success: false, message: 'Only quotations or estimates can be converted.' });
@@ -377,9 +384,10 @@ exports.convertToSale = async (req, res) => {
       await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, sale.customer);
     }
 
+    await invalidateShopCache(['dashboard', 'products', 'reports']);
     res.status(201).json({ success: true, data: sale });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -471,7 +479,7 @@ async function persistSaleReturn({ groups, refundMethod, reason, warehouse, user
 
 exports.createReturn = async (req, res) => {
   try {
-    const originalSale = await Sale.findById(req.params.id);
+    const originalSale = await Sale.findOne(scoped(req, { _id: req.params.id }));
     assertReturnableSale(originalSale);
     const requested = Array.isArray(req.body.items) ? req.body.items : [];
     const allocated = allocateReturnLines(originalSale.items, requested);
@@ -504,7 +512,7 @@ exports.createReturnsBatch = async (req, res) => {
     const groups = [];
     for (const entry of entries) {
       const saleId = entry.sale || entry.saleId;
-      const sale = await Sale.findById(saleId);
+      const sale = await Sale.findOne(scoped(req, { _id: saleId }));
       assertReturnableSale(sale);
       const allocated = allocateReturnLines(sale.items, entry.items || []);
       groups.push({ sale, allocated });
@@ -562,6 +570,10 @@ exports.getReturn = async (req, res) => {
 
 exports.getDashboardStats = async (req, res) => {
   try {
+    const cacheKey = tenantKey(['dashboard', 'stats']);
+    const cached = await cacheGet(cacheKey);
+    if (cached) return res.json({ success: true, data: cached });
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -576,47 +588,45 @@ exports.getDashboardStats = async (req, res) => {
       totalCustomers, totalReceivable, totalPayable, recentSales, monthlyTrend,
     ] = await Promise.all([
       Sale.aggregate([
-        {
-          $match: {
-            type: 'invoice',
-            status: { $nin: ['cancelled', 'draft'] },
-            isHeld: { $ne: true },
-            createdAt: { $gte: today },
-          },
-        },
+        scopedMatch(req, {
+          type: 'invoice',
+          status: { $nin: ['cancelled', 'draft'] },
+          isHeld: { $ne: true },
+          createdAt: { $gte: today },
+        }),
         { $group: { _id: null, total: { $sum: netAmount }, count: { $sum: 1 } } },
       ]),
       Sale.aggregate([
-        {
-          $match: {
-            type: 'invoice',
-            status: { $nin: ['cancelled', 'draft'] },
-            isHeld: { $ne: true },
-            createdAt: { $gte: monthStart },
-          },
-        },
+        scopedMatch(req, {
+          type: 'invoice',
+          status: { $nin: ['cancelled', 'draft'] },
+          isHeld: { $ne: true },
+          createdAt: { $gte: monthStart },
+        }),
         { $group: { _id: null, total: { $sum: netAmount }, count: { $sum: 1 } } },
       ]),
-      Product.countDocuments({ isActive: true }),
-      Product.countDocuments({ isActive: true, $expr: { $lte: ['$currentStock', '$minStock'] } }),
-      Customer.countDocuments({ isActive: true }),
-      Customer.aggregate([{ $group: { _id: null, total: { $sum: '$outstanding' } } }]),
-      Supplier.aggregate([{ $group: { _id: null, total: { $sum: '$outstanding' } } }]),
-      Sale.find({ type: 'invoice' })
+      Product.countDocuments(scoped(req, { isActive: true })),
+      Product.aggregate([
+        scopedMatch(req, { isActive: true }),
+        { $match: { $expr: { $lte: ['$currentStock', '$minStock'] } } },
+        { $count: 'n' },
+      ]).then((rows) => rows[0]?.n || 0),
+      Customer.countDocuments(scoped(req, { isActive: true })),
+      Customer.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
+      Supplier.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
+      Sale.find(scoped(req, { type: 'invoice' }))
         .select('invoiceNumber total customer customerName createdAt')
         .populate('customer', 'name')
         .sort({ createdAt: -1 })
         .limit(5)
         .lean(),
       Sale.aggregate([
-        {
-          $match: {
-            type: 'invoice',
-            status: { $nin: ['cancelled', 'draft'] },
-            isHeld: { $ne: true },
-            createdAt: { $gte: new Date(today.getFullYear(), today.getMonth() - 11, 1) },
-          },
-        },
+        scopedMatch(req, {
+          type: 'invoice',
+          status: { $nin: ['cancelled', 'draft'] },
+          isHeld: { $ne: true },
+          createdAt: { $gte: new Date(today.getFullYear(), today.getMonth() - 11, 1) },
+        }),
         {
           $group: {
             _id: {
@@ -647,22 +657,21 @@ exports.getDashboardStats = async (req, res) => {
       });
     }
 
-    res.json({
-      success: true,
-      data: {
-        todaySales: todaySales[0]?.total || 0,
-        todayCount: todaySales[0]?.count || 0,
-        monthSales: monthSales[0]?.total || 0,
-        monthCount: monthSales[0]?.count || 0,
-        totalProducts,
-        lowStockProducts,
-        totalCustomers,
-        totalReceivable: totalReceivable[0]?.total || 0,
-        totalPayable: totalPayable[0]?.total || 0,
-        recentSales,
-        monthlyTrend: filledTrend,
-      },
-    });
+    const data = {
+      todaySales: todaySales[0]?.total || 0,
+      todayCount: todaySales[0]?.count || 0,
+      monthSales: monthSales[0]?.total || 0,
+      monthCount: monthSales[0]?.count || 0,
+      totalProducts,
+      lowStockProducts,
+      totalCustomers,
+      totalReceivable: totalReceivable[0]?.total || 0,
+      totalPayable: totalPayable[0]?.total || 0,
+      recentSales,
+      monthlyTrend: filledTrend,
+    };
+    await cacheSet(cacheKey, data, 45);
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

@@ -1,10 +1,10 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireShopTenant } = require('../middleware/auth');
 const customerController = require('../controllers/customerController');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, requireShopTenant);
 
 router.get('/debtors', authorize('customer:read', 'accounting:read', 'pos:access'), customerController.getDebtors);
 router.get('/credit', authorize('customer:read', 'accounting:read', 'pos:access'), customerController.getCreditCustomers);

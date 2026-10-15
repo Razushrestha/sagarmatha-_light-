@@ -1,10 +1,10 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireShopTenant } = require('../middleware/auth');
 const electricianController = require('../controllers/electricianController');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, requireShopTenant);
 
 router.get('/', authorize('customer:read', 'pos:access'), electricianController.getElectricians);
 router.post('/', authorize('customer:create', 'customer:edit', 'pos:access'), electricianController.createElectrician);

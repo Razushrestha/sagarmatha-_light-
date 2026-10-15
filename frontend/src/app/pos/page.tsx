@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Modal from "@/components/ui/Modal";
 import { productAPI, saleAPI, customerAPI, miscAPI, electricianAPI } from "@/lib/api";
-import { formatCurrency, cn, getImageUrl } from "@/lib/utils";
+import { formatCurrency, cn, getImageUrl, getThumbUrl } from "@/lib/utils";
 import { isWireProduct, lineCommission, productCategoryName, productCommissionPercent } from "@/lib/commission";
 import toast from "react-hot-toast";
 import {
@@ -276,7 +276,7 @@ export default function POSPage() {
   }, [customerSearch, customerPanel]);
 
   const loadProducts = async (q?: string, categoryId?: string, brandId?: string) => {
-    const params: Record<string, string> = {};
+    const params: Record<string, string> = { limit: "80" };
     if (q?.trim()) params.search = q.trim();
     const cat = categoryId ?? selectedCategory;
     const br = brandId ?? selectedBrand;
@@ -287,7 +287,7 @@ export default function POSPage() {
   };
 
   const applyFilters = (categoryId: string, brandId: string) => {
-    const params: Record<string, string> = {};
+    const params: Record<string, string> = { limit: "80" };
     if (search.trim()) params.search = search.trim();
     if (categoryId) params.category = categoryId;
     if (brandId) params.brand = brandId;
@@ -751,6 +751,7 @@ export default function POSPage() {
                 const inCart = getCartQty(p._id);
                 const stock = stockStatus(p.currentStock);
                 const outOfStock = p.currentStock <= 0;
+                const thumb = p.images?.[0];
 
                 return (
                   <article
@@ -762,12 +763,16 @@ export default function POSPage() {
                     )}
                   >
                     <div className="relative aspect-[5/4] bg-brand-50 border-b border-brand-100 overflow-hidden">
-                      {p.images?.[0] ? (
+                      {thumb ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={getImageUrl(p.images[0])}
+                          src={getThumbUrl(thumb)}
                           alt={p.name}
                           className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = getImageUrl(thumb);
+                          }}
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
@@ -879,13 +884,22 @@ export default function POSPage() {
                 const lineTotal = getLineSubtotal(item);
                 const itemCommission = cartCommissions[index] || 0;
                 const wire = isWireProduct(item.product);
+                const thumb = item.product.images?.[0];
                 return (
                   <div key={item.product._id} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_100px_80px_110px_110px_40px] gap-3 items-center p-4 rounded-xl border border-brand-100 bg-brand-50/40">
                     <div className="flex items-center gap-4 min-w-0">
                       <div className="w-14 h-14 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 overflow-hidden">
-                        {item.product.images?.[0] ? (
+                        {thumb ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={getImageUrl(item.product.images[0])} alt="" className="w-full h-full object-cover" />
+                          <img
+                            src={getThumbUrl(thumb)}
+                            alt=""
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.onerror = null;
+                              e.currentTarget.src = getImageUrl(thumb);
+                            }}
+                          />
                         ) : (
                           <Package className="w-6 h-6 text-brand-300" />
                         )}

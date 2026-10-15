@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const productSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
-  sku: { type: String, required: true, unique: true, trim: true },
+  sku: { type: String, required: true, trim: true },
   barcode: { type: String, trim: true },
   brand: { type: mongoose.Schema.Types.ObjectId, ref: 'Brand' },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
@@ -43,5 +44,12 @@ productSchema.index({ name: 'text', sku: 'text', barcode: 'text' });
 productSchema.index({ isActive: 1, name: 1 });
 productSchema.index({ barcode: 1 });
 productSchema.index({ category: 1, isActive: 1 });
+
+applyTenantPlugin(productSchema, { uniqueFields: ['sku'] });
+productSchema.index({ tenantId: 1, isActive: 1, name: 1 });
+productSchema.index({ tenantId: 1, barcode: 1 });
+productSchema.index({ tenantId: 1, category: 1, isActive: 1 });
+productSchema.index({ tenantId: 1, brand: 1, isActive: 1 });
+productSchema.index({ tenantId: 1, currentStock: 1 });
 
 module.exports = mongoose.model('Product', productSchema);

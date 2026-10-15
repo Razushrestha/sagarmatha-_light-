@@ -1,4 +1,6 @@
 const authRoutes = require('./auth');
+const publicRoutes = require('./public');
+const platformRoutes = require('./platform');
 const productRoutes = require('./products');
 const saleRoutes = require('./sales');
 const customerRoutes = require('./customers');
@@ -9,6 +11,8 @@ const inventoryRoutes = require('./inventory');
 const electricianRoutes = require('./electricians');
 
 function mountApi(app) {
+  app.use('/api/public', publicRoutes);
+  app.use('/api/platform', platformRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/products', productRoutes);
   app.use('/api/sales', saleRoutes);

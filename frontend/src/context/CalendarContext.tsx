@@ -5,7 +5,6 @@ import { miscAPI } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import {
   CalendarType,
-  getCalendarType,
   readStoredCalendarType,
   setCalendarPreference,
 } from "@/lib/nepaliDate";
@@ -13,28 +12,43 @@ import {
 interface CalendarContextType {
   calendarType: CalendarType;
   setCalendarType: (next: CalendarType) => void;
+  companyName: string;
+  setCompanyName: (next: string) => void;
 }
 
 const CalendarContext = createContext<CalendarContextType>({
   calendarType: "bs",
   setCalendarType: () => {},
+  companyName: "",
+  setCompanyName: () => {},
 });
 
 export function CalendarProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [calendarType, setType] = useState<CalendarType>(() => readStoredCalendarType());
+  const [companyName, setCompanyName] = useState("");
 
   useEffect(() => {
     setCalendarPreference(calendarType);
   }, [calendarType]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setCompanyName("");
+      return;
+    }
+    if (user.role === "platform_admin" && !user.impersonating) {
+      setCompanyName(user.companyName || "");
+      return;
+    }
+    setCompanyName(user.companyName || user.tenantName || "");
     miscAPI.getSettings()
       .then((res) => {
         const next = res.data.data?.calendarType === "ad" ? "ad" : "bs";
         setType(next);
         setCalendarPreference(next);
+        const name = String(res.data.data?.companyName || "").trim();
+        if (name) setCompanyName(name);
       })
       .catch(() => {});
   }, [user]);
@@ -46,7 +60,7 @@ export function CalendarProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <CalendarContext.Provider value={{ calendarType, setCalendarType }}>
+    <CalendarContext.Provider value={{ calendarType, setCalendarType, companyName, setCompanyName }}>
       {children}
     </CalendarContext.Provider>
   );
@@ -55,5 +69,3 @@ export function CalendarProvider({ children }: { children: ReactNode }) {
 export function useCalendar() {
   return useContext(CalendarContext);
 }
-
-export { getCalendarType };

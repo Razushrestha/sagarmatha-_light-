@@ -333,7 +333,6 @@ export default function PurchaseVoucherForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
-      {/* Header */}
       <div className="relative px-6 py-5 bg-brand-900 text-white shrink-0">
         {variant === "modal" && (
           <button
@@ -365,7 +364,6 @@ export default function PurchaseVoucherForm({
         </div>
       </div>
 
-      {/* Meta */}
       <div className="px-6 py-4 bg-brand-50/80 border-b border-brand-200 shrink-0">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
           <FormField label={isOrder ? "Record Date" : "Voucher Date"}>
@@ -406,7 +404,6 @@ export default function PurchaseVoucherForm({
         )}
       </div>
 
-      {/* Search */}
       <div className="px-6 py-3 border-b border-brand-100 bg-white shrink-0">
         <div className="flex flex-col sm:flex-row gap-2 sm:items-center max-w-3xl">
           <div className="relative flex-1">
@@ -471,7 +468,6 @@ export default function PurchaseVoucherForm({
         )}
       </div>
 
-      {/* Items table */}
       <div className="px-6 py-4 flex-1 min-h-[180px]">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-14 text-brand-400 border border-dashed border-brand-200 rounded-xl bg-brand-50/30">
@@ -579,7 +575,6 @@ export default function PurchaseVoucherForm({
         )}
       </div>
 
-      {/* Footer */}
       <div className="px-6 py-4 bg-brand-50 border-t border-brand-200 grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6 items-start shrink-0">
         <div className="bg-white border border-brand-200 rounded-xl p-4 space-y-3 h-full">
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-500">Options & Notes</p>
@@ -687,7 +682,6 @@ export default function PurchaseVoucherForm({
         </div>
       </div>
 
-      {/* Actions */}
       <div className="px-6 py-3.5 border-t border-brand-200 bg-white flex items-center justify-between gap-3 shrink-0">
         <button type="button" onClick={onCancel} className="btn-secondary flex items-center gap-2 h-10 px-4">
           <X className="w-4 h-4" /> Cancel

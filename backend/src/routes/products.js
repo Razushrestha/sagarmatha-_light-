@@ -1,11 +1,11 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireShopTenant } = require('../middleware/auth');
 const productController = require('../controllers/productController');
-const { upload, spreadsheetUpload } = require('../middleware/upload');
+const { upload, spreadsheetUpload, handleUploadError } = require('../middleware/upload');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, requireShopTenant);
 
 router.get('/', authorize('product:read', 'pos:access'), productController.getProducts);
 router.get('/export', authorize('product:read', 'pos:access'), productController.exportProducts);
@@ -21,6 +21,7 @@ router.post(
   '/upload-image',
   authorize('product:create', 'product:edit'),
   upload.single('image'),
+  handleUploadError,
   productController.uploadImage
 );
 router.post('/', authorize('product:create'), productController.createProduct);

@@ -1,10 +1,10 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireShopTenant } = require('../middleware/auth');
 const inventoryController = require('../controllers/inventoryController');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, requireShopTenant);
 
 router.post('/adjust', authorize('stock:adjust', 'product:edit'), inventoryController.adjustStock);
 router.post('/warehouses', authorize('stock:transfer', 'product:create', 'settings:manage'), inventoryController.createWarehouse);

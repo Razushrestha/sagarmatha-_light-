@@ -1,14 +1,56 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Tenant = require('../models/Tenant');
+const Settings = require('../models/Settings');
 const { DEFAULT_ROLES } = require('../config/permissions');
 const { createAuditLog } = require('../middleware/audit');
 const { cookieOptions } = require('../config/env');
+const { runWithTenant } = require('../utils/tenantContext');
+const { shopLoginBlocked, assertUserLimit, subscriptionSnapshot } = require('../services/planService');
 
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  });
+const WEAK_PASSWORDS = new Set(['admin123', 'password', '123456', 'nepatronix', 'changeme']);
+
+const generateToken = (user) => {
+  return jwt.sign(
+    { id: user._id, tenantId: user.tenantId || null, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+  );
 };
+
+function isWeakPassword(password) {
+  const value = String(password || '').trim().toLowerCase();
+  return WEAK_PASSWORDS.has(value);
+}
+
+async function authPayload(user, tenant) {
+  const roleConfig = DEFAULT_ROLES[user.role];
+  const mustChangePassword = Boolean(user.mustChangePassword);
+  let companyName = tenant?.name || null;
+  if (user.role !== 'platform_admin' || tenant) {
+    try {
+      const settings = await Settings.findOne().select('companyName').lean();
+      if (settings?.companyName) companyName = settings.companyName;
+    } catch {
+      // keep tenant name
+    }
+  }
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    tenantId: user.tenantId || tenant?._id || null,
+    tenantName: tenant?.name || null,
+    tenantStatus: tenant?.status || null,
+    companyName,
+    mustChangePassword,
+    permissions: user.permissions?.length ? user.permissions : roleConfig?.permissions || [],
+    landingPage: mustChangePassword ? '/change-password' : (roleConfig?.landingPage || '/dashboard'),
+    subscription: tenant ? await subscriptionSnapshot(tenant) : null,
+  };
+}
 
 exports.register = async (req, res) => {
   try {
@@ -19,22 +61,30 @@ exports.register = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email already registered.' });
     }
 
-    const user = await User.create({ name, email, password, phone, role: role || 'sales_staff' });
-    const token = generateToken(user._id);
+    if (role === 'platform_admin') {
+      return res.status(403).json({ success: false, message: 'Cannot assign platform admin from a shop.' });
+    }
 
-    res.cookie('token', token, cookieOptions());
+    if (req.tenant) {
+      await assertUserLimit(req.tenant);
+    }
+
+    const user = await User.create({
+      name,
+      email,
+      password,
+      phone,
+      role: role || 'sales_staff',
+      tenantId: req.tenantId,
+    });
+
     res.status(201).json({
       success: true,
-      data: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        landingPage: DEFAULT_ROLES[user.role]?.landingPage || '/dashboard',
-      },
+      message: 'User created.',
+      data: await authPayload(user, req.tenant),
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -43,7 +93,7 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     const user = await User.findOne({ email })
-      .select('+password name email role permissions isActive failedLoginAttempts lockUntil');
+      .select('+password name email role permissions isActive failedLoginAttempts lockUntil tenantId mustChangePassword');
     if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
@@ -54,6 +104,18 @@ exports.login = async (req, res) => {
 
     if (user.isLocked()) {
       return res.status(423).json({ success: false, message: 'Account locked. Try again later.' });
+    }
+
+    let tenant = null;
+    if (user.role !== 'platform_admin') {
+      if (!user.tenantId) {
+        return res.status(403).json({ success: false, message: 'Account is not linked to a shop.' });
+      }
+      tenant = await Tenant.findById(user.tenantId).lean();
+      const blocked = shopLoginBlocked(tenant);
+      if (blocked.blocked) {
+        return res.status(403).json({ success: false, message: blocked.message });
+      }
     }
 
     const isMatch = await user.comparePassword(password);
@@ -67,8 +129,7 @@ exports.login = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
-    const token = generateToken(user._id);
-    const roleConfig = DEFAULT_ROLES[user.role];
+    const token = generateToken(user);
     const now = new Date();
     const storedHash = user.password;
 
@@ -103,14 +164,50 @@ exports.login = async (req, res) => {
     res.cookie('token', token, cookieOptions());
     res.json({
       success: true,
-      data: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        permissions: user.permissions?.length ? user.permissions : roleConfig?.permissions || [],
-        landingPage: roleConfig?.landingPage || '/dashboard',
-      },
+      data: await authPayload(user, tenant),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.magicLogin = async (req, res) => {
+  try {
+    const token = String(req.body.token || req.query.token || '').trim();
+    if (!token || token.length < 20) {
+      return res.status(400).json({ success: false, message: 'Invite link is missing or invalid.' });
+    }
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOne({
+      inviteTokenHash: hash,
+      inviteExpiresAt: { $gt: new Date() },
+    }).select('+inviteTokenHash name email role permissions isActive tenantId mustChangePassword');
+    if (!user || !user.isActive) {
+      return res.status(401).json({ success: false, message: 'Invite link expired or already used. Ask Nepatronix to send a new one.' });
+    }
+    if (user.role === 'platform_admin') {
+      return res.status(403).json({ success: false, message: 'Invalid invite.' });
+    }
+    const tenant = await Tenant.findById(user.tenantId).lean();
+    const blocked = shopLoginBlocked(tenant);
+    if (blocked.blocked) {
+      return res.status(403).json({ success: false, message: blocked.message });
+    }
+    const now = new Date();
+    await User.updateOne(
+      { _id: user._id },
+      {
+        $set: { failedLoginAttempts: 0, lastLogin: now },
+        $unset: { inviteTokenHash: 1, inviteExpiresAt: 1, lockUntil: 1 },
+      }
+    );
+
+    const jwtToken = generateToken(user);
+    createAuditLog(user._id, 'login', 'user', user._id, { method: 'invite' }, null, req);
+    res.cookie('token', jwtToken, cookieOptions());
+    res.json({
+      success: true,
+      data: await authPayload(user, tenant),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -119,20 +216,63 @@ exports.login = async (req, res) => {
 
 exports.logout = async (req, res) => {
   res.cookie('token', '', { ...cookieOptions(), maxAge: 0 });
+  res.cookie('impersonateTenantId', '', { ...cookieOptions(), maxAge: 0 });
+  res.cookie('impersonateUntil', '', { ...cookieOptions(), maxAge: 0 });
   res.json({ success: true, message: 'Logged out successfully.' });
 };
 
 exports.getMe = async (req, res) => {
-  const roleConfig = DEFAULT_ROLES[req.user.role];
   const user = req.user.toObject ? req.user.toObject() : req.user;
   res.json({
     success: true,
     data: {
-      ...user,
-      permissions: user.permissions?.length ? user.permissions : roleConfig?.permissions || [],
-      landingPage: roleConfig?.landingPage || '/dashboard',
+      ...(await authPayload(user, req.tenant)),
+      impersonating: Boolean(req.impersonating),
+      impersonatingUntil: req.impersonateUntil || null,
     },
   });
+};
+
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Current and new password are required.' });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 8 characters.' });
+    }
+    if (isWeakPassword(newPassword)) {
+      return res.status(400).json({ success: false, message: 'Choose a stronger password. Common passwords are not allowed.' });
+    }
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ success: false, message: 'New password must be different from the current password.' });
+    }
+
+    const account = await runWithTenant(null, () =>
+      User.findById(req.user._id).select('+password mustChangePassword role tenantId name email permissions')
+    );
+    if (!account) return res.status(404).json({ success: false, message: 'User not found.' });
+
+    const ok = await account.comparePassword(currentPassword);
+    if (!ok) {
+      return res.status(401).json({ success: false, message: 'Current password is incorrect.' });
+    }
+
+    account.password = newPassword;
+    account.mustChangePassword = false;
+    await runWithTenant(null, () => account.save());
+
+    await createAuditLog(account._id, 'update', 'user', account._id, null, { passwordChanged: true }, req);
+
+    res.json({
+      success: true,
+      message: 'Password updated.',
+      data: await authPayload(account, req.tenant),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
 
 exports.getUsers = async (req, res) => {
@@ -146,7 +286,9 @@ exports.getUsers = async (req, res) => {
 
 exports.getRoles = async (_req, res) => {
   try {
-    const roles = Object.entries(DEFAULT_ROLES).map(([key, config]) => ({
+    const roles = Object.entries(DEFAULT_ROLES)
+      .filter(([key]) => key !== 'platform_admin')
+      .map(([key, config]) => ({
       key,
       name: config.name,
       description: config.description,
@@ -198,7 +340,7 @@ exports.updateUser = async (req, res) => {
     }
     if (name != null && String(name).trim()) user.name = String(name).trim();
     if (phone != null) user.phone = String(phone).trim();
-    if (role && DEFAULT_ROLES[role]) user.role = role;
+    if (role && DEFAULT_ROLES[role] && role !== 'platform_admin') user.role = role;
     if (password) {
       if (String(password).length < 6) {
         return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });

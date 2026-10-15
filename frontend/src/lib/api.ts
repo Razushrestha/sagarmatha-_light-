@@ -25,7 +25,8 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 && typeof window !== "undefined") {
-      if (!window.location.pathname.includes("/login")) {
+      const path = window.location.pathname;
+      if (!path.includes("/login") && !path.includes("/signup") && !path.includes("/change-password")) {
         window.location.href = "/login";
       }
     }
@@ -35,19 +36,20 @@ api.interceptors.response.use(
 
 export default api;
 
-// Auth
 export const authAPI = {
   login: (data: { email: string; password: string }) => api.post("/auth/login", data),
+  magicLogin: (data: { token: string }) => api.post("/auth/magic-login", data),
   logout: () => api.post("/auth/logout"),
   getMe: () => api.get("/auth/me"),
   getUsers: () => api.get("/auth/users"),
   getRoles: () => api.get("/auth/roles"),
   updateUser: (id: string, data: object) => api.put(`/auth/users/${id}`, data),
   register: (data: object) => api.post("/auth/register", data),
+  changePassword: (data: { currentPassword: string; newPassword: string }) =>
+    api.post("/auth/change-password", data),
 };
 
-// Products
-export const ALL_RECORDS = "0";
+export const ALL_RECORDS = "200";
 
 export const productAPI = {
   getAll: (params?: Record<string, string>) => api.get("/products", { params: { limit: ALL_RECORDS, ...params } }),
@@ -59,7 +61,7 @@ export const productAPI = {
   uploadImage: (file: File) => {
     const formData = new FormData();
     formData.append("image", file);
-    return api.post("/products/upload-image", formData);
+    return api.post("/products/upload-image", formData, { timeout: 120000 });
   },
   exportFile: (format: "csv" | "xlsx") =>
     api.get("/products/export", { params: { format }, responseType: "blob" }),
@@ -72,7 +74,6 @@ export const productAPI = {
   },
 };
 
-// Sales
 export const saleAPI = {
   getAll: (params?: Record<string, string>) => api.get("/sales", { params }),
   getById: (id: string) => api.get(`/sales/${id}`),
@@ -89,7 +90,6 @@ export const saleAPI = {
   getReturn: (id: string) => api.get(`/sales/returns/${id}`),
 };
 
-// Customers
 export const customerAPI = {
   getAll: (params?: Record<string, string>) => api.get("/customers", { params }),
   getById: (id: string) => api.get(`/customers/${id}`),
@@ -113,7 +113,6 @@ export const electricianAPI = {
     api.post(`/electricians/${id}/commission-received`, data),
 };
 
-// Suppliers
 export const supplierAPI = {
   getAll: (params?: Record<string, string>) => api.get("/suppliers", { params }),
   getById: (id: string) => api.get(`/suppliers/${id}`),
@@ -140,7 +139,6 @@ export const supplierAPI = {
   deletePayment: (id: string) => api.delete(`/suppliers/payments/${id}`),
 };
 
-// Misc
 export const miscAPI = {
   getCategories: () => api.get("/categories"),
   createCategory: (data: object) => api.post("/categories", data),
@@ -159,7 +157,6 @@ export const miscAPI = {
   search: (q: string) => api.get("/search", { params: { q } }),
 };
 
-// Accounting
 export const accountingAPI = {
   getAccounts: () => api.get("/accounting/accounts"),
   getSummary: () => api.get("/accounting/summary"),
@@ -171,13 +168,44 @@ export const accountingAPI = {
   updateExpense: (id: string, data: object) => api.put(`/accounting/expenses/${id}`, data),
   removeExpense: (id: string) => api.delete(`/accounting/expenses/${id}`),
   getReports: (params?: Record<string, string>) => api.get("/accounting/reports", { params }),
+  enqueueReport: (data: object) => api.post("/accounting/reports/jobs", data),
+  getReportJob: (jobId: string) => api.get(`/accounting/reports/jobs/${jobId}`),
 };
 
-// Inventory ops
 export const inventoryAPI = {
   adjustStock: (data: object) => api.post("/inventory/adjust", data),
   createWarehouse: (data: object) => api.post("/inventory/warehouses", data),
   markNotificationRead: (id: string) => api.put(`/inventory/notifications/${id}/read`),
   markAllNotificationsRead: () => api.put("/inventory/notifications/read-all"),
   getAuditLogs: (params?: Record<string, string>) => api.get("/inventory/audit-logs", { params }),
+};
+
+export const publicAPI = {
+  signup: (data: object) => api.post("/public/signup", data),
+  config: () => api.get("/public/config"),
+};
+
+export const platformAPI = {
+  getMetrics: () => api.get("/platform/metrics"),
+  testAlert: () => api.post("/platform/alerts/test"),
+  getTenants: (params?: Record<string, string>) => api.get("/platform/tenants", { params }),
+  exportTenants: (params?: Record<string, string>) =>
+    api.get("/platform/tenants/export", { params, responseType: "blob" }),
+  getTenant: (id: string) => api.get(`/platform/tenants/${id}`),
+  createTenant: (data: object) => api.post("/platform/tenants", data),
+  updateTenant: (id: string, data: object) => api.put(`/platform/tenants/${id}`, data),
+  lifecycle: (id: string, data: object) => api.post(`/platform/tenants/${id}/lifecycle`, data),
+  resetOwnerPassword: (id: string, data?: object) => api.post(`/platform/tenants/${id}/reset-owner-password`, data || {}),
+  impersonate: (id: string, data?: { minutes?: number }) => api.post(`/platform/tenants/${id}/impersonate`, data || {}),
+  stopImpersonate: () => api.post("/platform/stop-impersonate"),
+  getSnapshot: (id: string) => api.get(`/platform/tenants/${id}/snapshot`),
+  inviteOwner: (id: string) => api.post(`/platform/tenants/${id}/invite`),
+  getSupportLog: (params?: Record<string, string>) => api.get("/platform/support-log", { params }),
+  getBackups: () => api.get("/platform/backups"),
+  runBackup: () => api.post("/platform/backups/run", {}, { timeout: 130000 }),
+  getSettings: () => api.get("/platform/settings"),
+  updateSettings: (data: object) => api.put("/platform/settings", data),
+  getAdmins: () => api.get("/platform/admins"),
+  createAdmin: (data: object) => api.post("/platform/admins", data),
+  updateAdmin: (id: string, data: object) => api.put(`/platform/admins/${id}`, data),
 };

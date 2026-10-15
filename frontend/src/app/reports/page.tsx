@@ -18,10 +18,53 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+    const heavy = reportType === "products" || reportType === "inventory";
     setLoading(true);
-    accountingAPI.getReports({ type: reportType })
-      .then((res) => setData(res.data.data))
-      .finally(() => setLoading(false));
+    setData([]);
+
+    const loadSync = () => accountingAPI.getReports({ type: reportType })
+      .then((res) => {
+        if (!cancelled) setData(res.data.data || []);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    if (!heavy) {
+      loadSync();
+      return () => { cancelled = true; };
+    }
+
+    let timer: ReturnType<typeof setTimeout>;
+    accountingAPI.enqueueReport({ type: reportType })
+      .then(async (queued) => {
+        const jobId = queued.data.data?.jobId;
+        if (!jobId) throw new Error("No job id");
+        const poll = async () => {
+          if (cancelled) return;
+          const job = await accountingAPI.getReportJob(jobId);
+          const payload = job.data.data;
+          if (payload.status === "completed") {
+            if (!cancelled) setData(payload.data || []);
+            setLoading(false);
+            return;
+          }
+          if (payload.status === "failed") {
+            throw new Error(payload.message || "Report failed");
+          }
+          timer = setTimeout(poll, 600);
+        };
+        await poll();
+      })
+      .catch(() => {
+        if (!cancelled) loadSync();
+      });
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [reportType]);
 
   const tabs = [

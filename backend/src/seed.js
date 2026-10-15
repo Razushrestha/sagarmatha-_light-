@@ -1,7 +1,7 @@
 require('dotenv').config();
-const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const User = require('./models/User');
+const Tenant = require('./models/Tenant');
 const Category = require('./models/Category');
 const Brand = require('./models/Brand');
 const { Unit } = require('./models/Unit');
@@ -12,26 +12,53 @@ const Supplier = require('./models/Supplier');
 const Settings = require('./models/Settings');
 const company = require('./config/company');
 const { Account } = require('./models/Account');
+const { runWithTenant } = require('./utils/tenantContext');
 
 const seed = async () => {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED !== 'YES') {
+    console.error('Refusing to seed in production. Set ALLOW_SEED=YES to override.');
+    process.exit(1);
+  }
+
   await connectDB();
 
   console.log('Clearing existing data...');
   await Promise.all([
+    Tenant.deleteMany(),
     User.deleteMany(), Category.deleteMany(), Brand.deleteMany(),
     Unit.deleteMany(), Warehouse.deleteMany(), Product.deleteMany(),
     Customer.deleteMany(), Supplier.deleteMany(), Settings.deleteMany(),
     Account.deleteMany(),
   ]);
 
-  console.log('Creating admin user...');
+  console.log('Creating platform admin and demo shop...');
   await User.create({
+    name: 'Nepatronix Platform',
+    email: 'platform@nepatronix.com',
+    password: 'admin123',
+    phone: '9800000009',
+    role: 'platform_admin',
+    mustChangePassword: process.env.NODE_ENV === 'production',
+  });
+
+  const tenant = await Tenant.create({
+    name: company.companyName,
+    slug: 'sagarmatha',
+    status: 'active',
+    plan: 'business',
+  });
+
+  await runWithTenant(tenant._id, async () => {
+  const owner = await User.create({
     name: 'Super Admin',
     email: 'admin@nepatronix.com',
     password: 'admin123',
     phone: '9800000000',
     role: 'super_admin',
+    tenantId: tenant._id,
   });
+  tenant.owner = owner._id;
+  await tenant.save();
 
   await User.create({
     name: 'Sales Staff',
@@ -39,6 +66,7 @@ const seed = async () => {
     password: 'sales123',
     phone: '9800000001',
     role: 'sales_staff',
+    tenantId: tenant._id,
   });
 
   console.log('Creating categories & brands...');
@@ -141,9 +169,12 @@ const seed = async () => {
     { code: '6002', name: 'Salary Expense', type: 'expense', isSystem: true },
   ]);
 
+  });
+
   console.log('\n✅ Database seeded successfully!');
   console.log('\nLogin credentials:');
-  console.log('  Admin: admin@nepatronix.com / admin123');
+  console.log('  Platform: platform@nepatronix.com / admin123');
+  console.log('  Shop admin: admin@nepatronix.com / admin123');
   console.log('  Sales: sales@nepatronix.com / sales123');
 
   process.exit(0);

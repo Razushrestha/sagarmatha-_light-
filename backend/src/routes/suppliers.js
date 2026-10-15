@@ -1,10 +1,10 @@
 const express = require('express');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireShopTenant } = require('../middleware/auth');
 const supplierController = require('../controllers/supplierController');
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, requireShopTenant);
 
 router.get('/payments', authorize('purchase:read', 'accounting:read'), supplierController.getSupplierPayments);
 router.post('/payments', authorize('purchase:create', 'accounting:write'), supplierController.createSupplierPayment);

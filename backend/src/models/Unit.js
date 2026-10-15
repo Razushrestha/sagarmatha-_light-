@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const unitSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -12,6 +13,9 @@ const unitConversionSchema = new mongoose.Schema({
   factor: { type: Number, required: true },
   product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
 }, { timestamps: true });
+
+applyTenantPlugin(unitSchema);
+applyTenantPlugin(unitConversionSchema);
 
 const Unit = mongoose.model('Unit', unitSchema);
 const UnitConversion = mongoose.model('UnitConversion', unitConversionSchema);

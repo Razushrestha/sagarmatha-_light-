@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const company = require('../config/company');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const settingsSchema = new mongoose.Schema({
   companyName: { type: String, default: company.companyName },
@@ -24,5 +25,7 @@ const settingsSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: true },
   }],
 }, { timestamps: true });
+
+applyTenantPlugin(settingsSchema, { uniqueTenant: true });
 
 module.exports = mongoose.model('Settings', settingsSchema);

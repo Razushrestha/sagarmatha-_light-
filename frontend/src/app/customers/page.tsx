@@ -45,6 +45,9 @@ function todayInputDate() {
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const debouncedSearch = useDebouncedValue(search, 250);
   const [showModal, setShowModal] = useState(false);
@@ -55,17 +58,23 @@ export default function CustomersPage() {
   const loadCustomers = async (q?: string) => {
     setLoading(true);
     try {
-      const res = await customerAPI.getAll({ search: q ?? debouncedSearch, limit: "50" });
+      const res = await customerAPI.getAll({ search: q ?? debouncedSearch, limit: "50", page: String(page) });
       setCustomers(res.data.data);
+      setPages(res.data.pagination?.pages || 1);
+      setTotal(res.data.pagination?.total || 0);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
+
+  useEffect(() => {
     loadCustomers(debouncedSearch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch]);
+  }, [debouncedSearch, page]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -266,6 +275,16 @@ export default function CustomersPage() {
             </tbody>
           </table>
         </div>
+        {pages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-brand-100 text-sm text-gray-600">
+            <span>{total} customers</span>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary py-1 px-3" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</button>
+              <span className="py-1">Page {page} of {pages}</span>
+              <button type="button" className="btn-secondary py-1 px-3" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editingId ? "Edit Customer" : "Add New Customer"} size="lg">

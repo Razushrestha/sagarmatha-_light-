@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const notificationSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -13,5 +14,8 @@ const notificationSchema = new mongoose.Schema({
   isRead: { type: Boolean, default: false },
   priority: { type: String, enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
 }, { timestamps: true });
+
+applyTenantPlugin(notificationSchema);
+notificationSchema.index({ tenantId: 1, isRead: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Notification', notificationSchema);

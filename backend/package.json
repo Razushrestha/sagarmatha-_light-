@@ -7,7 +7,14 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed": "node src/seed.js",
-    "wipe-except-inventory": "node scripts/wipe-except-inventory.js"
+    "wipe-except-inventory": "node scripts/wipe-except-inventory.js",
+    "migrate-tenants": "node scripts/migrate-tenants.js",
+    "backup-mongo": "node scripts/backup-mongo.js",
+    "restore-mongo": "node scripts/restore-mongo.js",
+    "test-restore-mongo": "node scripts/test-restore-mongo.js",
+    "test:isolation": "node scripts/isolation-smoke.js && node scripts/isolation-bot.js",
+    "test:isolation-smoke": "node scripts/isolation-smoke.js",
+    "test:isolation-bot": "node scripts/isolation-bot.js"
   },
   "keywords": [
     "erp",
@@ -20,6 +27,7 @@
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "bullmq": "^6.3.15",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -28,10 +36,13 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
     "morgan": "^1.10.0",
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^10.1.1",
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"

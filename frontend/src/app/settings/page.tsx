@@ -55,7 +55,7 @@ function roleLabel(role: string) {
 
 export default function SettingsPage() {
   const { user, hasPermission, refreshUser } = useAuth();
-  const { setCalendarType } = useCalendar();
+  const { setCalendarType, setCompanyName } = useCalendar();
   const canManageUsers = hasPermission("users:manage", "settings:manage");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,6 +102,7 @@ export default function SettingsPage() {
     try {
       await miscAPI.updateSettings(settings as unknown as Record<string, unknown>);
       setCalendarType(settings.calendarType === "ad" ? "ad" : "bs");
+      if (settings.companyName) setCompanyName(settings.companyName);
       toast.success("Settings saved!");
     } catch {
       toast.error("Failed to save settings");
@@ -274,7 +275,11 @@ export default function SettingsPage() {
           <FormCard>
             <FormSection
               title="Login accounts"
-              description="Admin can update email and password for Admin and Sales (and other staff). Leave password blank to keep the current one."
+              description={
+                user?.subscription
+                  ? `Admin can update email and password. This ${user.subscription.plan} plan allows ${user.subscription.limits.users} users (${user.subscription.usage.users} in use). Leave password blank to keep the current one.`
+                  : "Admin can update email and password for staff. Leave password blank to keep the current one."
+              }
             >
               <div className="overflow-x-auto">
                 <table className="w-full">

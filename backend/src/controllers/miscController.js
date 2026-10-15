@@ -1,3 +1,4 @@
+const { scoped, parsePaging } = require('../utils/tenantQuery');
 const Category = require('../models/Category');
 const Brand = require('../models/Brand');
 const { Unit } = require('../models/Unit');
@@ -7,7 +8,7 @@ const Notification = require('../models/Notification');
 const Product = require('../models/Product');
 
 exports.getCategories = async (req, res) => {
-  const categories = await Category.find({ isActive: true }).populate('parent', 'name').lean();
+  const categories = await Category.find(scoped(req, { isActive: true })).populate('parent', 'name').lean();
   res.json({ success: true, data: categories });
 };
 
@@ -50,7 +51,7 @@ exports.deleteCategory = async (req, res) => {
 };
 
 exports.getBrands = async (req, res) => {
-  const brands = await Brand.find({ isActive: true }).lean();
+  const brands = await Brand.find(scoped(req, { isActive: true })).lean();
   res.json({ success: true, data: brands });
 };
 
@@ -96,28 +97,31 @@ exports.deleteBrand = async (req, res) => {
 };
 
 exports.getUnits = async (req, res) => {
-  const units = await Unit.find({ isActive: true }).lean();
+  const units = await Unit.find(scoped(req, { isActive: true })).lean();
   res.json({ success: true, data: units });
 };
 
 exports.getWarehouses = async (req, res) => {
-  const warehouses = await Warehouse.find({ isActive: true }).sort({ isDefault: -1, name: 1 }).lean();
+  const warehouses = await Warehouse.find(scoped(req, { isActive: true })).sort({ isDefault: -1, name: 1 }).lean();
   res.json({ success: true, data: warehouses });
 };
 
 exports.getStockMovements = async (req, res) => {
-  const { product, page = 1, limit = 50 } = req.query;
-  const query = product ? { product } : {};
-  const skip = (page - 1) * limit;
-  const movements = await StockMovement.find(query)
-    .populate('product', 'name sku')
-    .populate('warehouse', 'name')
-    .populate('createdBy', 'name')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(Number(limit))
-    .lean();
-  res.json({ success: true, data: movements });
+  const { product } = req.query;
+  const { page, limit, skip } = parsePaging(req.query, { defaultLimit: 50, max: 100 });
+  const query = scoped(req, product ? { product } : {});
+  const [movements, total] = await Promise.all([
+    StockMovement.find(query)
+      .populate('product', 'name sku')
+      .populate('warehouse', 'name')
+      .populate('createdBy', 'name')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    StockMovement.countDocuments(query),
+  ]);
+  res.json({ success: true, data: movements, pagination: { total, page, pages: Math.ceil(total / limit) || 1, limit } });
 };
 
 exports.getSettings = async (req, res) => {
@@ -138,7 +142,7 @@ exports.updateSettings = async (req, res) => {
 };
 
 exports.getNotifications = async (req, res) => {
-  const notifications = await Notification.find()
+  const notifications = await Notification.find(scoped(req))
     .sort({ createdAt: -1 })
     .limit(50)
     .lean();
@@ -153,27 +157,27 @@ exports.globalSearch = async (req, res) => {
   const Sale = require('../models/Sale');
 
   const [products, customers, sales] = await Promise.all([
-    Product.find({
+    Product.find(scoped(req, {
       isActive: true,
       $or: [
         { name: { $regex: q, $options: 'i' } },
         { sku: { $regex: q, $options: 'i' } },
         { barcode: { $regex: q, $options: 'i' } },
       ],
-    }).limit(10).select('name sku sellingPrice currentStock').lean(),
-    Customer.find({
+    })).limit(10).select('name sku sellingPrice currentStock').lean(),
+    Customer.find(scoped(req, {
       isActive: true,
       $or: [
         { name: { $regex: q, $options: 'i' } },
         { phone: { $regex: q, $options: 'i' } },
       ],
-    }).limit(10).select('name phone outstanding').lean(),
-    Sale.find({
+    })).limit(10).select('name phone outstanding').lean(),
+    Sale.find(scoped(req, {
       $or: [
         { invoiceNumber: { $regex: q, $options: 'i' } },
         { customerName: { $regex: q, $options: 'i' } },
       ],
-    }).limit(10).select('invoiceNumber total customerName createdAt').lean(),
+    })).limit(10).select('invoiceNumber total customerName createdAt').lean(),
   ]);
 
   res.json({ success: true, data: { products, customers, sales } });

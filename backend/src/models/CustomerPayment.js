@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const customerPaymentSchema = new mongoose.Schema({
   customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
@@ -12,5 +13,8 @@ const customerPaymentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 customerPaymentSchema.index({ customer: 1, createdAt: -1 });
+
+applyTenantPlugin(customerPaymentSchema);
+customerPaymentSchema.index({ tenantId: 1, customer: 1, createdAt: -1 });
 
 module.exports = mongoose.model('CustomerPayment', customerPaymentSchema);

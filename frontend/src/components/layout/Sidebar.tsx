@@ -7,7 +7,8 @@ import {
   Calculator, BarChart3, TrendingUp, Shield, UserCog, FolderKanban,
   Bell, Settings, FileSearch, FileText, Receipt, ChevronLeft, ChevronRight, Zap,
 } from "lucide-react";
-import { COMPANY } from "@/lib/company";
+import { PRODUCT, shopMonogram } from "@/lib/company";
+import { useCalendar } from "@/context/CalendarContext";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useState } from "react";
@@ -94,7 +95,10 @@ interface SidebarProps {
 export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
   const { user, hasPermission } = useAuth();
+  const { companyName } = useCalendar();
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const shopName = companyName || user?.companyName || user?.tenantName || PRODUCT.shortName;
+  const monogram = shopMonogram(shopName);
 
   useEffect(() => {
     const match = groupForPath(pathname);
@@ -122,12 +126,12 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen = fals
     >
       <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10">
         <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center flex-shrink-0">
-          <span className="text-brand-900 font-bold text-sm">{COMPANY.monogram}</span>
+          <span className="text-brand-900 font-bold text-sm">{monogram}</span>
         </div>
         {!hideLabels && (
           <div className="overflow-hidden min-w-0">
-            <h1 className="font-semibold text-sm leading-tight truncate">{COMPANY.shortName}</h1>
-            <p className="text-[10px] text-gray-400 truncate">{COMPANY.tagline}</p>
+            <h1 className="font-semibold text-sm leading-tight truncate">{shopName}</h1>
+            <p className="text-[10px] text-gray-400 truncate">{PRODUCT.name}</p>
           </div>
         )}
       </div>
