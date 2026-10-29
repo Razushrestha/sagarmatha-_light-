@@ -54,11 +54,12 @@ export default function LoginPage() {
       router.replace(landingPage);
       toast.success("Welcome back!");
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { message?: string } }; code?: string; message?: string };
+      const error = err as { response?: { status?: number; data?: { message?: string } }; code?: string; message?: string };
       if (!error.response) {
         toast.error("Cannot reach the API. Make sure the website and backend are running on their own ports.");
       } else {
-        toast.error(error.response?.data?.message || "Login failed");
+        const apiMessage = error.response.data?.message;
+        toast.error(apiMessage || `Login failed (${error.response.status || "error"}). Check that the API is running.`);
       }
     } finally {
       setLoading(false);
