@@ -21,13 +21,23 @@ const Settings = require('../models/Settings');
 const Role = require('../models/Role');
 const User = require('../models/User');
 const Tenant = require('../models/Tenant');
+const Shift = require('../models/Shift');
+const DiningTable = require('../models/DiningTable');
+const PriceRule = require('../models/PriceRule');
+const StockLot = require('../models/StockLot');
+const DeliveryChallan = require('../models/DeliveryChallan');
+const Room = require('../models/Room');
+const Stay = require('../models/Stay');
+const Folio = require('../models/Folio');
+const ChannelReservation = require('../models/ChannelReservation');
 const { tenantUploadDir } = require('../utils/storageUsage');
 
 const TENANT_MODELS = [
   Product, Account, JournalEntry, Unit, UnitConversion, Warehouse, StockMovement,
   Brand, Category, Customer, CustomerPayment, Supplier, SupplierPayment,
   Sale, SaleReturn, Purchase, PurchaseReturn, Expense, Electrician,
-  Notification, AuditLog, Settings, Role,
+  Notification, AuditLog, Settings, Role, Shift,
+  DiningTable, PriceRule, StockLot, DeliveryChallan, Room, Stay, Folio, ChannelReservation,
 ];
 
 async function wipeTenantData(tenantId) {

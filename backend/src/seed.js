@@ -41,11 +41,14 @@ const seed = async () => {
     mustChangePassword: process.env.NODE_ENV === 'production',
   });
 
+  const { modulesFor } = require('./config/industry');
   const tenant = await Tenant.create({
     name: company.companyName,
     slug: 'sagarmatha',
     status: 'active',
     plan: 'business',
+    industry: 'hardware',
+    modules: modulesFor('hardware'),
   });
 
   await runWithTenant(tenant._id, async () => {
@@ -94,6 +97,9 @@ const seed = async () => {
     { name: 'Box', shortName: 'Box' },
     { name: 'Roll', shortName: 'Roll' },
     { name: 'Kilogram', shortName: 'Kg' },
+    { name: 'Gram', shortName: 'g' },
+    { name: 'Litre', shortName: 'L' },
+    { name: 'Millilitre', shortName: 'ml' },
     { name: 'Set', shortName: 'Set' },
     { name: 'Pair', shortName: 'Pair' },
   ]);
@@ -164,6 +170,7 @@ const seed = async () => {
     { code: '2102', name: 'VAT Input', type: 'tax', isSystem: true },
     { code: '3001', name: 'Owner Capital', type: 'equity', isSystem: true },
     { code: '4001', name: 'Sales Revenue', type: 'income', isSystem: true },
+    { code: '4002', name: 'Service Charge', type: 'income', isSystem: true },
     { code: '5001', name: 'Cost of Goods Sold', type: 'cogs', isSystem: true },
     { code: '6001', name: 'Rent Expense', type: 'expense', isSystem: true },
     { code: '6002', name: 'Salary Expense', type: 'expense', isSystem: true },

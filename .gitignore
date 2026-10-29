@@ -22,6 +22,7 @@ Thumbs.db
 # uploads (keep folder, ignore files)
 backend/uploads/products/*
 !backend/uploads/products/.gitkeep
+backend/uploads/tenants/**
 
 # mongo dumps
 backend/backups/

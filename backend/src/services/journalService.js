@@ -9,13 +9,21 @@ const ACCOUNT_CODES = {
   PAYABLE: '2001',
   VAT_PAYABLE: '2101',
   SALES: '4001',
+  SERVICE_CHARGE: '4002',
   COGS: '5001',
 };
 
 const getAccountByCode = async (code, session) =>
   sessionQuery(Account.findOne({ code }), session);
 
-const postJournal = async ({ description, reference, referenceId, lines, userId }, session) => {
+async function ensureAccount(code, defaults, session) {
+  const existing = await getAccountByCode(code, session);
+  if (existing) return existing;
+  const [created] = await Account.create([{ code, isSystem: true, ...defaults }], sessionOpts(session));
+  return created;
+}
+
+const postJournal = async ({ description, reference, referenceId, folioId, source, lines, userId }, session) => {
   const entries = [];
   for (const line of lines) {
     if (!line.debit && !line.credit) continue;
@@ -29,15 +37,84 @@ const postJournal = async ({ description, reference, referenceId, lines, userId 
     account.balance += (line.debit || 0) - (line.credit || 0);
     await account.save(sessionOpts(session));
   }
-  if (entries.length === 0) return;
-  await JournalEntry.create([{
+  if (entries.length === 0) return null;
+  const [entry] = await JournalEntry.create([{
     description,
     reference,
     referenceId,
+    folioId: folioId || null,
+    source: source || undefined,
     entries,
     createdBy: userId,
   }], sessionOpts(session));
+  return entry;
 };
+
+const CHARGE_SOURCES = ['shop_sale', 'mix', 'cafe_ticket', 'room'];
+
+function chargeSourceFromSale(sale) {
+  if (sale?.serviceType || (sale?.items || []).some((item) => Array.isArray(item.recipeDeducted) && item.recipeDeducted.length)) {
+    return 'cafe_ticket';
+  }
+  if ((sale?.items || []).some((item) => item.tinted === true)) return 'mix';
+  return 'shop_sale';
+}
+
+function buildChargeLines({ accounts = {}, tax = {} }) {
+  const cash = Number(accounts.cash) || 0;
+  const receivable = Number(accounts.receivable) || 0;
+  const serviceCharge = Number(accounts.serviceCharge) || 0;
+  const vat = Number(accounts.vat != null ? accounts.vat : tax.vatAmount) || 0;
+  const sales = Number(accounts.sales) || 0;
+  const lines = [];
+  if (cash > 0) lines.push({ code: ACCOUNT_CODES.CASH, debit: cash });
+  if (receivable > 0) lines.push({ code: ACCOUNT_CODES.RECEIVABLE, debit: receivable });
+  if (sales > 0) lines.push({ code: ACCOUNT_CODES.SALES, credit: sales });
+  if (serviceCharge > 0) lines.push({ code: ACCOUNT_CODES.SERVICE_CHARGE, credit: serviceCharge });
+  if (vat > 0) lines.push({ code: ACCOUNT_CODES.VAT_PAYABLE, credit: vat });
+  return lines;
+}
+
+/**
+ * Single money path for shop sales, mixed-paint sales, and cafe tickets.
+ *
+ * folioId is stored on the journal (and on the sale) and otherwise ignored.
+ * Hotel PMS later can park this charge on a guest folio without a second ledger.
+ *
+ * @param {{ tenant?: *, customer?: *, tax?: { vatAmount?: number }, accounts?: object, source?: object, session?: * }} args
+ */
+async function postCharge({ tenant, customer, tax = {}, accounts = {}, source = {}, session } = {}) {
+  void tenant;
+  void customer;
+  const type = CHARGE_SOURCES.includes(source.type) ? source.type : 'shop_sale';
+  const serviceCharge = Number(accounts.serviceCharge) || 0;
+  if (serviceCharge > 0) {
+    await ensureAccount(ACCOUNT_CODES.SERVICE_CHARGE, { name: 'Service Charge', type: 'income' }, session);
+  }
+  const lines = buildChargeLines({ accounts, tax });
+  const entry = await postJournal({
+    description: source.description || `Charge ${source.reference || ''}`.trim(),
+    reference: source.reference,
+    referenceId: source.id,
+    folioId: source.folioId || null,
+    source: type,
+    lines,
+    userId: source.userId,
+  }, session);
+  if (source.folioId) {
+    const { addCharge } = require('./folioService');
+    await addCharge({
+      folioId: source.folioId,
+      saleId: source.id,
+      description: source.description,
+      source: type,
+      amount: (Number(accounts.sales) || 0) + (Number(accounts.serviceCharge) || 0) + (Number(accounts.vat) || 0),
+      paid: Number(accounts.cash) || 0,
+      session,
+    });
+  }
+  return entry;
+}
 
 const postSaleJournal = async (sale, userId, session) => {
   const cashPaid = (sale.payments || [])
@@ -45,21 +122,30 @@ const postSaleJournal = async (sale, userId, session) => {
     .reduce((s, p) => s + p.amount, 0);
   const creditAmount = sale.amountDue || 0;
   const vat = sale.vatAmount || 0;
-  const netSales = Math.max(0, sale.total - vat);
+  const serviceCharge = Number(sale.serviceChargeAmount) || 0;
+  const netSales = Math.max(0, sale.total - vat - serviceCharge);
 
-  const lines = [];
-  if (cashPaid > 0) lines.push({ code: ACCOUNT_CODES.CASH, debit: cashPaid });
-  if (creditAmount > 0) lines.push({ code: ACCOUNT_CODES.RECEIVABLE, debit: creditAmount });
-  if (netSales > 0) lines.push({ code: ACCOUNT_CODES.SALES, credit: netSales });
-  if (vat > 0) lines.push({ code: ACCOUNT_CODES.VAT_PAYABLE, credit: vat });
-
-  await postJournal({
-    description: `Sale ${sale.invoiceNumber}`,
-    reference: sale.invoiceNumber,
-    referenceId: sale._id,
-    lines,
-    userId,
-  }, session);
+  return postCharge({
+    tenant: sale.tenantId,
+    customer: sale.customer,
+    tax: { vatAmount: vat, isVatBill: sale.isVatBill },
+    accounts: {
+      cash: cashPaid,
+      receivable: creditAmount,
+      sales: netSales,
+      serviceCharge,
+      vat,
+    },
+    source: {
+      type: chargeSourceFromSale(sale),
+      id: sale._id,
+      reference: sale.invoiceNumber,
+      description: `Sale ${sale.invoiceNumber}`,
+      folioId: sale.folioId,
+      userId,
+    },
+    session,
+  });
 };
 
 const postSaleReturnJournal = async (saleReturn, { cashRefund = 0, dueReduce = 0 } = {}, userId, session) => {
@@ -138,4 +224,16 @@ const reverseSupplierPaymentJournal = async (payment, account, userId, session) 
   }, session);
 };
 
-module.exports = { postSaleJournal, postSaleReturnJournal, postPurchaseJournal, postSupplierPaymentJournal, reverseSupplierPaymentJournal, postJournal, ACCOUNT_CODES };
+module.exports = {
+  postCharge,
+  postSaleJournal,
+  postSaleReturnJournal,
+  postPurchaseJournal,
+  postSupplierPaymentJournal,
+  reverseSupplierPaymentJournal,
+  postJournal,
+  ACCOUNT_CODES,
+  CHARGE_SOURCES,
+  chargeSourceFromSale,
+  buildChargeLines,
+};

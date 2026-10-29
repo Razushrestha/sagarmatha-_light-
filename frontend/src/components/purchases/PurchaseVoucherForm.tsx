@@ -540,6 +540,7 @@ export default function PurchaseVoucherForm({
                           type="number"
                           min={0}
                           max={100}
+                          step="any"
                           value={item.discount || ""}
                           onChange={(e) => updateItem(idx, "discount", e.target.value)}
                           className={cn(cellInput, "text-center")}
@@ -593,13 +594,13 @@ export default function PurchaseVoucherForm({
           <div className="grid grid-cols-2 gap-3">
             {includeDiscount && (
               <FormField label="Invoice Discount (%)">
-                <input type="number" min={0} max={100} value={discountPercent || ""}
+                <input type="number" min={0} max={100} step="any" value={discountPercent || ""}
                   onChange={(e) => setDiscountPercent(safeNum(Number(e.target.value)))} className={cellInput} />
               </FormField>
             )}
             {includeOtherCharges && (
               <FormField label="Other Charges">
-                <input type="number" min={0} value={otherCharges || ""}
+                <input type="number" min={0} step="any" value={otherCharges || ""}
                   onChange={(e) => setOtherCharges(safeNum(Number(e.target.value)))} className={cellInput} />
               </FormField>
             )}

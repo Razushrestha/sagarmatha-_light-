@@ -9,6 +9,10 @@ const miscRoutes = require('./misc');
 const accountingRoutes = require('./accounting');
 const inventoryRoutes = require('./inventory');
 const electricianRoutes = require('./electricians');
+const paintRoutes = require('./paint');
+const cafeRoutes = require('./cafe');
+const shiftRoutes = require('./shifts');
+const hotelRoutes = require('./hotel');
 
 function mountApi(app) {
   app.use('/api/public', publicRoutes);
@@ -21,6 +25,10 @@ function mountApi(app) {
   app.use('/api/accounting', accountingRoutes);
   app.use('/api/inventory', inventoryRoutes);
   app.use('/api/electricians', electricianRoutes);
+  app.use('/api/paint', paintRoutes);
+  app.use('/api/cafe', cafeRoutes);
+  app.use('/api/shifts', shiftRoutes);
+  app.use('/api/hotel', hotelRoutes);
   app.use('/api', miscRoutes);
 }
 

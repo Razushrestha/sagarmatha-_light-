@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { scoped, parsePaging } = require('../utils/tenantQuery');
 const Category = require('../models/Category');
 const Brand = require('../models/Brand');
@@ -7,13 +8,26 @@ const Settings = require('../models/Settings');
 const Notification = require('../models/Notification');
 const Product = require('../models/Product');
 
+function relatedProductIds(input) {
+  if (!Array.isArray(input)) return undefined;
+  return [...new Set(input.map((id) => String(id)).filter((id) => mongoose.Types.ObjectId.isValid(id)))].slice(0, 8);
+}
+
 exports.getCategories = async (req, res) => {
-  const categories = await Category.find(scoped(req, { isActive: true })).populate('parent', 'name').lean();
+  const categories = await Category.find(scoped(req, { isActive: true }))
+    .populate('parent', 'name')
+    .populate('relatedProducts', 'name sku sellingPrice wholesalePrice dealerPrice currentStock images attrs commissionPercent')
+    .lean();
   res.json({ success: true, data: categories });
 };
 
 exports.createCategory = async (req, res) => {
-  const category = await Category.create(req.body);
+  const relatedProducts = relatedProductIds(req.body.relatedProducts);
+  const category = await Category.create({
+    name: req.body.name,
+    description: req.body.description,
+    ...(relatedProducts ? { relatedProducts } : {}),
+  });
   res.status(201).json({ success: true, data: category });
 };
 
@@ -21,9 +35,12 @@ exports.updateCategory = async (req, res) => {
   try {
     const name = String(req.body.name || '').trim();
     if (!name) return res.status(400).json({ success: false, message: 'Category name is required.' });
+    const update = { name, description: req.body.description };
+    const relatedProducts = relatedProductIds(req.body.relatedProducts);
+    if (relatedProducts) update.relatedProducts = relatedProducts;
     const category = await Category.findByIdAndUpdate(
       req.params.id,
-      { name, description: req.body.description },
+      update,
       { new: true, runValidators: true }
     );
     if (!category) return res.status(404).json({ success: false, message: 'Category not found.' });

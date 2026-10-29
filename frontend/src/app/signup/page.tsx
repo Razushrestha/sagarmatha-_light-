@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { PRODUCT } from "@/lib/company";
 import { publicAPI } from "@/lib/api";
+import { INDUSTRY_LABELS, PUBLIC_INDUSTRIES } from "@/lib/industry";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -17,13 +18,14 @@ export default function SignupPage() {
     email: "",
     phone: "",
     password: "",
+    industry: "hardware",
   });
 
   useEffect(() => {
     publicAPI.config().then((res) => setSignupEnabled(res.data.data?.signupEnabled !== false)).catch(() => {});
   }, []);
 
-  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
   };
 
@@ -67,6 +69,14 @@ export default function SignupPage() {
             <div>
               <label className="label">Shop name</label>
               <input className="input-field" value={form.shopName} onChange={set("shopName")} required placeholder="My Electrical Store" />
+            </div>
+            <div>
+              <label className="label">Business type</label>
+              <select className="input-field" value={form.industry} onChange={set("industry")}>
+                {PUBLIC_INDUSTRIES.map((value) => (
+                  <option key={value} value={value}>{INDUSTRY_LABELS[value]}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="label">Your name</label>

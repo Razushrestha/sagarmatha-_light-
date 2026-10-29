@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { saleAPI, miscAPI } from "@/lib/api";
 import { COMPANY } from "@/lib/company";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils";
-import { Printer, ArrowLeft, Receipt, X, Download } from "lucide-react";
+import { Printer, ArrowLeft, Receipt, X, Download, ChefHat } from "lucide-react";
+import { openKitchenTicket } from "@/lib/kitchenTicket";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
@@ -27,7 +28,10 @@ interface Sale {
   customerAddress?: string;
   customerPan?: string;
   customer?: { name: string; phone: string; address?: string; pan?: string; vatNumber?: string };
-  items: Array<{ productName: string; sku?: string; quantity: number; unitPrice: number; subtotal: number }>;
+  items: Array<{ productName: string; sku?: string; quantity: number; unitPrice: number; subtotal: number; tinted?: boolean; shadeCode?: string; modifiers?: Array<{ group: string; option: string }>; complimentary?: boolean }>;
+  serviceType?: string;
+  serviceChargePercent?: number;
+  serviceChargeAmount?: number;
   subtotal: number;
   discount: number;
   vatAmount: number;
@@ -37,9 +41,13 @@ interface Sale {
   amountDue: number;
   payments: Array<{ method: string; amount: number }>;
   isVatBill: boolean;
+  fiscalYear?: string;
+  irdStatus?: string;
+  happyHourPercent?: number;
   createdAt: string;
   validityDate?: string;
   createdBy?: { name: string };
+  notes?: string;
 }
 
 interface Settings {
@@ -194,6 +202,24 @@ export default function InvoicePrintPage() {
         <button onClick={() => window.print()} className="btn-primary flex items-center gap-2">
           <Printer className="w-4 h-4" /> Print
         </button>
+        {sale.serviceType && (
+          <button
+            type="button"
+            onClick={() => openKitchenTicket({
+              invoiceNumber: sale.invoiceNumber,
+              serviceType: sale.serviceType,
+              items: sale.items.map((item) => ({
+                productName: item.productName,
+                quantity: item.quantity,
+                modifiers: item.modifiers,
+                complimentary: item.complimentary,
+              })),
+            })}
+            className="btn-secondary flex items-center gap-2"
+          >
+            <ChefHat className="w-4 h-4" /> Kitchen ticket
+          </button>
+        )}
         <button
           type="button"
           onClick={handleDownload}
@@ -313,6 +339,13 @@ export default function InvoicePrintPage() {
                   {sale.type === "estimate" ? "Estimate" : sale.isVatBill ? "Tax Invoice" : "Invoice"}
                 </p>
                 <p className="text-lg font-bold">{sale.invoiceNumber}</p>
+                {sale.serviceType && (
+                  <p className="text-xs mt-1">{sale.serviceType === "takeaway" ? "Takeaway" : "Dine-in"}</p>
+                )}
+                {sale.fiscalYear && <p className="text-xs mt-1">FY {sale.fiscalYear}</p>}
+                {sale.irdStatus && sale.irdStatus !== "skipped" && (
+                  <p className="text-xs mt-1">IRD {sale.irdStatus}</p>
+                )}
               </div>
               <label className="mt-3 flex items-center justify-end gap-2 text-sm text-gray-600">
                 <span className="shrink-0">Date (B.S.)</span>
@@ -371,6 +404,13 @@ export default function InvoicePrintPage() {
                 <td className="px-3 py-2">{i + 1}</td>
                 <td className="px-3 py-2">
                   <p className="font-medium">{item.productName}</p>
+                  {item.modifiers && item.modifiers.length > 0 && (
+                    <p className="text-xs text-gray-500">{item.modifiers.map((row) => row.option).join(" · ")}</p>
+                  )}
+                  {item.complimentary && <p className="text-xs text-gray-500">Complimentary</p>}
+                  {item.tinted && (
+                    <p className="text-xs text-gray-500">Tinted{item.shadeCode ? ` · ${item.shadeCode}` : ""} · not returnable</p>
+                  )}
                   {item.sku && <p className="text-xs text-gray-400">{item.sku}</p>}
                 </td>
                 <td className="px-3 py-2 text-right">{item.quantity}</td>
@@ -381,10 +421,20 @@ export default function InvoicePrintPage() {
           </tbody>
         </table>
 
+        {sale.notes && (
+          <p className="text-sm text-gray-600 mb-4">Job: {sale.notes}</p>
+        )}
+
         <div className="flex justify-end mb-6">
           <div className="w-64 space-y-1 text-sm">
             <div className="flex justify-between"><span>Subtotal</span><span>{formatCurrency(sale.subtotal)}</span></div>
             {sale.discount > 0 && <div className="flex justify-between text-brand-700"><span>Discount ({sale.discount}%)</span><span>-{formatCurrency(sale.subtotal * sale.discount / 100)}</span></div>}
+            {(sale.serviceChargeAmount || 0) > 0 && (
+              <div className="flex justify-between">
+                <span>Service charge ({sale.serviceChargePercent || 0}%)</span>
+                <span>{formatCurrency(sale.serviceChargeAmount || 0)}</span>
+              </div>
+            )}
             <div className="flex justify-between"><span>Taxable Amount</span><span>{formatCurrency(taxableAmount)}</span></div>
             {sale.isVatBill ? (
               <div className="flex justify-between"><span>VAT (13%)</span><span>{formatCurrency(sale.vatAmount)}</span></div>

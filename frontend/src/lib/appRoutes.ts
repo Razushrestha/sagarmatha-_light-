@@ -1,3 +1,5 @@
+import { isPathAllowed, type ShopModules } from "@/lib/industry";
+
 export const APP_ROUTES = [
   "/dashboard",
   "/pos",
@@ -19,6 +21,17 @@ export const APP_ROUTES = [
   "/customers/debtors",
   "/customers/credit",
   "/electricians",
+  "/paint/shades",
+  "/cafe/recipes",
+  "/cafe/tables",
+  "/cafe/hours",
+  "/shifts",
+  "/hotel",
+  "/hotel/housekeeping",
+  "/hotel/report",
+  "/hotel/audit",
+  "/warranty",
+  "/projects",
   "/accounting",
   "/expenses",
   "/reports",
@@ -26,6 +39,13 @@ export const APP_ROUTES = [
   "/settings",
 ] as const;
 
-export function prefetchAppRoutes(prefetch: (href: string) => void) {
-  APP_ROUTES.forEach((href) => prefetch(href));
+export function prefetchAppRoutes(
+  prefetch: (href: string) => void,
+  modules?: Partial<ShopModules> | null,
+  industry?: string | null
+) {
+  APP_ROUTES.forEach((href) => {
+    if (!isPathAllowed(href, modules, industry)) return;
+    prefetch(href);
+  });
 }

@@ -33,6 +33,8 @@ const PERMISSIONS = {
   'users:manage': 'Manage users',
   'settings:manage': 'Manage settings',
   'audit:view': 'View audit logs',
+  'hotel:desk': 'Hotel front desk',
+  'hotel:housekeeping': 'Hotel housekeeping',
 };
 
 const DEFAULT_ROLES = {
@@ -77,6 +79,24 @@ const DEFAULT_ROLES = {
     description: 'Inventory and stock management',
     permissions: ['product:read', 'product:edit', 'stock:adjust', 'stock:transfer', 'purchase:read', 'purchase:create'],
     landingPage: '/inventory',
+  },
+  front_desk: {
+    name: 'Front desk',
+    description: 'Hotel reception — rooms, folio, arrivals. Not restaurant POS.',
+    permissions: ['hotel:desk', 'invoice:create', 'invoice:read', 'customer:create', 'customer:read', 'customer:edit', 'reports:view', 'accounting:write'],
+    landingPage: '/hotel',
+  },
+  housekeeping: {
+    name: 'Housekeeping',
+    description: 'Room status, assigned rooms, inspect and out-of-order.',
+    permissions: ['hotel:housekeeping'],
+    landingPage: '/hotel/housekeeping',
+  },
+  restaurant: {
+    name: 'Restaurant',
+    description: 'Cafe/restaurant POS and kitchen. Not front desk.',
+    permissions: ['pos:access', 'invoice:create', 'invoice:read', 'discount:5', 'customer:create', 'customer:read', 'product:read'],
+    landingPage: '/pos',
   },
 };
 

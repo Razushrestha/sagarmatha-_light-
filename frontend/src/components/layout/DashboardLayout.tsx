@@ -11,6 +11,7 @@ import { platformAPI } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { prefetchAppRoutes } from "@/lib/appRoutes";
 import { useNavShortcuts } from "@/lib/navShortcuts";
+import { isPathAllowed } from "@/lib/industry";
 
 function remainingLabel(until?: number | null) {
   if (!until) return "";
@@ -71,7 +72,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  useNavShortcuts(Boolean(user));
+  useNavShortcuts(Boolean(user), user?.modules, user?.industry);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -87,6 +88,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       router.replace("/platform");
     }
     if (user.role !== "platform_admin" && pathname.startsWith("/platform")) {
+      router.replace(user.landingPage || "/dashboard");
+      return;
+    }
+    if (!isPathAllowed(pathname, user.modules, user.industry)) {
       router.replace(user.landingPage || "/dashboard");
     }
   }, [user, loading, router, pathname]);
@@ -104,7 +109,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     if (!user) return;
-    const run = () => prefetchAppRoutes((href) => router.prefetch(href));
+    const run = () => prefetchAppRoutes((href) => router.prefetch(href), user.modules, user.industry);
     if (typeof window !== "undefined" && "requestIdleCallback" in window) {
       const id = window.requestIdleCallback(run, { timeout: 1500 });
       return () => window.cancelIdleCallback(id);

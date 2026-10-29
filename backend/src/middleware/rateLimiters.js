@@ -55,6 +55,14 @@ function loginLimiter() {
   });
 }
 
+function bookLimiter() {
+  return limiter({
+    windowMs: 60 * 60 * 1000,
+    max: 30,
+    message: { success: false, message: 'Too many booking requests. Try again later.' },
+  });
+}
+
 function signupLimiter() {
   return limiter({
     windowMs: 60 * 60 * 1000,
@@ -63,4 +71,4 @@ function signupLimiter() {
   });
 }
 
-module.exports = { apiLimiter, loginLimiter, signupLimiter };
+module.exports = { apiLimiter, loginLimiter, signupLimiter, bookLimiter };

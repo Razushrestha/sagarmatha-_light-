@@ -19,6 +19,8 @@ const journalEntrySchema = new mongoose.Schema({
   date: { type: Date, default: Date.now },
   reference: { type: String },
   referenceId: { type: mongoose.Schema.Types.ObjectId },
+  folioId: { type: mongoose.Schema.Types.ObjectId, default: null },
+  source: { type: String, enum: ['shop_sale', 'mix', 'cafe_ticket', 'room'] },
   description: { type: String, required: true },
   entries: [{
     account: { type: mongoose.Schema.Types.ObjectId, ref: 'Account', required: true },

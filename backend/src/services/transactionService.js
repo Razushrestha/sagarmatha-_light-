@@ -12,16 +12,49 @@ const CustomerPayment = require('../models/CustomerPayment');
 const { applyAllocationsToSale, applyRefundToSale } = require('../utils/saleReturn');
 const { recordStoreCredit, reconcileCustomerOutstanding } = require('../utils/salePayments');
 
+async function applyItemStock(item, { sign, session, warehouseId, type, reference, referenceId, userId }) {
+  const lines = Array.isArray(item.recipeDeducted) && item.recipeDeducted.length ? item.recipeDeducted : null;
+  if (!lines && !item.product) return null;
+  if (lines) {
+    let last = null;
+    for (const line of lines) {
+      const qty = Number(line.qty) * Number(item.quantity);
+      if (!(qty > 0)) continue;
+      last = await changeStock({
+        productId: line.product,
+        productName: line.productName,
+        delta: sign * qty,
+        session,
+        warehouseId,
+        type,
+        reference,
+        referenceId,
+        userId,
+      });
+    }
+    return last;
+  }
+  return changeStock({
+    productId: item.product,
+    productName: item.productName,
+    delta: sign * Number(item.quantity),
+    session,
+    warehouseId,
+    type,
+    reference,
+    referenceId,
+    userId,
+  });
+}
+
 const processSale = async (sale, userId, req) =>
   withOptionalTransaction(async (session) => {
     const warehouseId = await resolveWarehouseId(sale.warehouse);
     sale.warehouse = warehouseId;
 
     for (const item of sale.items) {
-      const product = await changeStock({
-        productId: item.product,
-        productName: item.productName,
-        delta: -item.quantity,
+      const product = await applyItemStock(item, {
+        sign: -1,
         session,
         warehouseId,
         type: 'sale',
@@ -30,7 +63,7 @@ const processSale = async (sale, userId, req) =>
         userId,
       });
 
-      if (product.currentStock <= product.minStock) {
+      if (product && product.currentStock <= product.minStock) {
         await Notification.create([{
           type: product.currentStock === 0 ? 'out_of_stock' : 'low_stock',
           title: product.currentStock === 0 ? 'Out of Stock' : 'Low Stock Alert',
@@ -78,6 +111,9 @@ const processPurchase = async (purchase, userId, req) =>
           $set: { purchasePrice: item.unitPrice },
           $push: { priceHistory: { price: item.unitPrice, type: 'purchase', date: new Date() } },
         },
+        lotCost: item.unitPrice,
+        batchNo: item.batchNo || purchase.invoiceNumber,
+        expiry: item.expiry,
       });
     }
 
@@ -143,10 +179,8 @@ const reverseSale = async (sale, userId, req) =>
     const warehouseId = await resolveWarehouseId(sale.warehouse);
 
     for (const item of sale.items) {
-      await changeStock({
-        productId: item.product,
-        productName: item.productName,
-        delta: item.quantity,
+      await applyItemStock(item, {
+        sign: 1,
         session,
         warehouseId,
         type: 'sale_return',
@@ -192,10 +226,12 @@ const processSaleReturn = async (saleReturn, originalSale, userId, req, extra = 
     let storeCredit = 0;
 
     for (const item of saleReturn.items) {
-      await changeStock({
-        productId: item.product,
-        productName: item.productName,
-        delta: item.quantity,
+      const original = (originalSale?.items || []).find((row) => String(row.product) === String(item.product));
+      await applyItemStock({
+        ...item,
+        recipeDeducted: item.recipeDeducted?.length ? item.recipeDeducted : original?.recipeDeducted,
+      }, {
+        sign: 1,
         session,
         warehouseId,
         type: 'sale_return',

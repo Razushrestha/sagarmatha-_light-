@@ -22,6 +22,7 @@ import {
   Download,
 } from "lucide-react";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import { INDUSTRIES, INDUSTRY_LABELS, type Industry } from "@/lib/industry";
 
 interface TenantRow {
   _id: string;
@@ -29,6 +30,7 @@ interface TenantRow {
   slug: string;
   status: string;
   plan: string;
+  industry?: string;
   createdAt: string;
   owner?: { name?: string; email?: string; phone?: string };
   paidUntil?: string | null;
@@ -63,6 +65,7 @@ const emptyForm = {
   plan: "business",
   status: "active",
   storageGb: 30,
+  industry: "hardware",
 };
 
 function storageGbUsed(bytes?: number) {
@@ -294,7 +297,9 @@ export default function PlatformPage() {
                                 <Link href={`/platform/tenants/${t._id}`} className="font-medium text-slate-900 hover:text-indigo-600">
                                   {t.name}
                                 </Link>
-                                <p className="text-xs text-slate-400 truncate">slug: {t.slug}</p>
+                                <p className="text-xs text-slate-400 truncate">
+                                  {INDUSTRY_LABELS[(t.industry as Industry) || "hardware"]} · slug: {t.slug}
+                                </p>
                               </div>
                             </div>
                           </td>
@@ -475,6 +480,17 @@ export default function PlatformPage() {
               minLength={6}
             />
           </Field>
+
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">Business type</label>
+          <select
+            className="platform-input mb-4"
+            value={form.industry}
+            onChange={(e) => setForm({ ...form, industry: e.target.value })}
+          >
+            {INDUSTRIES.map((value) => (
+              <option key={value} value={value}>{INDUSTRY_LABELS[value]}</option>
+            ))}
+          </select>
 
           <label className="block text-sm font-medium text-slate-700 mb-1.5">Plan</label>
           <select

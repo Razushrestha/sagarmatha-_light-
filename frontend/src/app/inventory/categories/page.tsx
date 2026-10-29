@@ -6,14 +6,21 @@ import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
 import { FormField } from "@/components/ui/FormField";
 import { FormActions } from "@/components/ui/FormLayout";
-import { miscAPI } from "@/lib/api";
+import { miscAPI, productAPI } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { Plus, Tag, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
+
+interface RelatedProduct {
+  _id: string;
+  name: string;
+}
 
 interface Category {
   _id: string;
   name: string;
   description?: string;
+  relatedProducts?: Array<RelatedProduct | string>;
 }
 
 interface Brand {
@@ -27,13 +34,17 @@ function apiError(err: unknown, fallback: string) {
 }
 
 export default function CategoriesPage() {
+  const { hasModule } = useAuth();
+  const tintingOn = hasModule("tinting");
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [products, setProducts] = useState<RelatedProduct[]>([]);
   const [showCatModal, setShowCatModal] = useState(false);
   const [showBrandModal, setShowBrandModal] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
   const [catName, setCatName] = useState("");
+  const [relatedIds, setRelatedIds] = useState<string[]>([]);
   const [brandName, setBrandName] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -45,19 +56,26 @@ export default function CategoriesPage() {
       setCategories(cats.data.data);
       setBrands(brandsRes.data.data);
     });
+    if (tintingOn) {
+      productAPI.getAll({ limit: "200" }).then((res) => setProducts(res.data.data || [])).catch(() => {});
+    }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [tintingOn]);
+
+  const relatedIdOf = (row: RelatedProduct | string) => (typeof row === "string" ? row : row._id);
 
   const openAddCategory = () => {
     setEditingCategory(null);
     setCatName("");
+    setRelatedIds([]);
     setShowCatModal(true);
   };
 
   const openEditCategory = (cat: Category) => {
     setEditingCategory(cat);
     setCatName(cat.name);
+    setRelatedIds((cat.relatedProducts || []).map(relatedIdOf));
     setShowCatModal(true);
   };
 
@@ -77,11 +95,12 @@ export default function CategoriesPage() {
     e.preventDefault();
     setSaving(true);
     try {
+      const payload = { name: catName.trim(), relatedProducts: relatedIds };
       if (editingCategory) {
-        await miscAPI.updateCategory(editingCategory._id, { name: catName.trim() });
+        await miscAPI.updateCategory(editingCategory._id, payload);
         toast.success("Category updated");
       } else {
-        await miscAPI.createCategory({ name: catName.trim() });
+        await miscAPI.createCategory(payload);
         toast.success("Category created");
       }
       setShowCatModal(false);
@@ -157,7 +176,14 @@ export default function CategoriesPage() {
             ) : categories.map((cat) => (
               <div key={cat._id} className="flex items-center gap-3 px-6 py-3 hover:bg-brand-50/50">
                 <Tag className="w-4 h-4 text-brand-400" />
-                <span className="font-medium flex-1">{cat.name}</span>
+                <span className="font-medium flex-1">
+                  {cat.name}
+                  {tintingOn && (cat.relatedProducts || []).length > 0 && (
+                    <span className="block text-[11px] font-normal text-brand-400">
+                      {(cat.relatedProducts || []).length} related (brush / roller / thinner)
+                    </span>
+                  )}
+                </span>
                 <div className="flex items-center gap-1">
                   <button type="button" onClick={() => openEditCategory(cat)} className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium hover:bg-brand-100 text-brand-700">
                     <Pencil className="w-3.5 h-3.5" /> Edit
@@ -210,6 +236,35 @@ export default function CategoriesPage() {
           <FormField label="Category Name" required>
             <input className="input-field" value={catName} onChange={(e) => setCatName(e.target.value)} required />
           </FormField>
+          {tintingOn && (
+            <FormField label="Related items">
+              <p className="text-xs text-brand-500 mb-2">Static links for the POS — brush, roller, thinner. Not a recommendation engine.</p>
+              <div className="max-h-40 overflow-y-auto border border-brand-100 rounded-lg divide-y divide-brand-50">
+                {products.length === 0 ? (
+                  <p className="p-3 text-sm text-brand-400">Load products first.</p>
+                ) : products.map((product) => {
+                  const checked = relatedIds.includes(product._id);
+                  return (
+                    <label key={product._id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!checked && relatedIds.length >= 8}
+                        onChange={() => {
+                          setRelatedIds((prev) =>
+                            prev.includes(product._id)
+                              ? prev.filter((id) => id !== product._id)
+                              : [...prev, product._id]
+                          );
+                        }}
+                      />
+                      <span className="truncate">{product.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </FormField>
+          )}
           <FormActions className="mt-0 pt-3 border-0">
             <button type="submit" disabled={saving} className="btn-primary">
               {saving ? "Saving..." : editingCategory ? "Save Changes" : "Create"}

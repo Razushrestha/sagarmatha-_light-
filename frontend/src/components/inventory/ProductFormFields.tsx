@@ -3,6 +3,8 @@
 import { FormField, SelectField } from "@/components/ui/FormField";
 import { FormSection, FormGrid, FormCheckbox } from "@/components/ui/FormLayout";
 import ImageUpload from "@/components/ui/ImageUpload";
+import { useAuth } from "@/context/AuthContext";
+import { PACK_LITRES, packLabel } from "@/lib/paint";
 
 export type ProductFormState = {
   name: string;
@@ -22,6 +24,8 @@ export type ProductFormState = {
   vatInclusive: boolean;
   vatRate: string;
   commissionPercent: string;
+  paintRole?: string;
+  packLitres?: string;
 };
 
 type Option = { _id: string; name: string };
@@ -44,11 +48,24 @@ export const emptyProductForm: ProductFormState = {
   vatInclusive: true,
   vatRate: "13",
   commissionPercent: "5",
+  paintRole: "stock",
+  packLitres: "",
 };
 
-export function productPayload(form: ProductFormState, images: string[]) {
+export function productPayload(form: ProductFormState, images: string[], existingAttrs?: Record<string, unknown>) {
+  const { paintRole, packLitres, ...rest } = form;
+  const role = paintRole || "stock";
+  const attrs: Record<string, unknown> = { ...(existingAttrs || {}), role, tinted: role === "tinted" || existingAttrs?.tinted === true };
+  if (role === "paint_base") attrs.packLitres = Number(packLitres) || 4;
+  else if (role === "stock") {
+    if (packLitres) attrs.packLitres = Number(packLitres);
+    else delete attrs.packLitres;
+  } else if (role === "colorant" || role === "menu" || role === "ingredient") {
+    delete attrs.packLitres;
+    if (role === "menu" || role === "ingredient") attrs.tinted = false;
+  }
   return {
-    ...form,
+    ...rest,
     images,
     purchasePrice: parseFloat(form.purchasePrice) || 0,
     sellingPrice: parseFloat(form.sellingPrice) || 0,
@@ -58,6 +75,7 @@ export function productPayload(form: ProductFormState, images: string[]) {
     currentStock: Number(form.currentStock),
     vatRate: parseFloat(form.vatRate) || 0,
     commissionPercent: parseFloat(form.commissionPercent) || 0,
+    attrs,
   };
 }
 
@@ -90,6 +108,11 @@ export default function ProductFormFields({
   showDealerPrice?: boolean;
   htmlRequired?: boolean;
 }) {
+  const { hasModule } = useAuth();
+  const showCommission = hasModule("partners");
+  const tintingOn = hasModule("tinting");
+  const recipesOn = hasModule("recipes");
+  const tinted = form.paintRole === "tinted";
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
       <div className="xl:col-span-3">
@@ -140,9 +163,11 @@ export default function ProductFormFields({
             <FormField label="VAT Rate (%)">
               <input type="number" step="any" min="0" className="input-field" value={form.vatRate} onChange={(e) => update("vatRate", e.target.value)} />
             </FormField>
+            {showCommission && (
             <FormField label="Commission %">
               <input type="number" min={0} max={100} step="any" className="input-field" value={form.commissionPercent} onChange={(e) => update("commissionPercent", e.target.value)} />
             </FormField>
+            )}
           </FormGrid>
           <div className="mt-3">
             <FormCheckbox id={checkboxId} label="VAT inclusive pricing" checked={form.vatInclusive} onChange={(v) => update("vatInclusive", v)} />
@@ -167,6 +192,46 @@ export default function ProductFormFields({
             </FormField>
           </FormGrid>
         </FormSection>
+
+        {recipesOn && (
+          <FormSection title="Cafe role" description="Ingredients are stocked. Menu items are made to order from a recipe.">
+            <FormField label="Role">
+              <select className="input-field" value={["menu", "ingredient"].includes(form.paintRole || "") ? form.paintRole : "stock"} onChange={(e) => update("paintRole", e.target.value)}>
+                <option value="stock">Sellable (no recipe)</option>
+                <option value="menu">Menu item (recipe)</option>
+                <option value="ingredient">Ingredient (beans, milk, cup)</option>
+              </select>
+            </FormField>
+          </FormSection>
+        )}
+
+        {tintingOn && (
+          <FormSection title="Paint role" description="Colorant stock is in millilitres. Base tins are sold or mixed.">
+            <FormGrid cols={2}>
+              <FormField label="Role">
+                {tinted ? (
+                  <input className="input-field" value="Tinted (mixed)" disabled />
+                ) : (
+                  <select className="input-field" value={form.paintRole || "stock"} onChange={(e) => update("paintRole", e.target.value)}>
+                    <option value="stock">Ready-made / other stock</option>
+                    <option value="paint_base">Base tin (white / mix)</option>
+                    <option value="colorant">Colorant (ml)</option>
+                  </select>
+                )}
+              </FormField>
+              {(form.paintRole === "paint_base" || form.paintRole === "stock") && (
+                <FormField label={form.paintRole === "paint_base" ? "Pack size" : "Pack size (ready-made tin)"}>
+                  <select className="input-field" value={form.packLitres || ""} onChange={(e) => update("packLitres", e.target.value)}>
+                    {form.paintRole === "stock" && <option value="">Not a tin</option>}
+                    {PACK_LITRES.map((pack) => (
+                      <option key={pack} value={String(pack)}>{packLabel(pack)}</option>
+                    ))}
+                  </select>
+                </FormField>
+              )}
+            </FormGrid>
+          </FormSection>
+        )}
 
         <FormSection title="Description">
           <textarea className="input-field min-h-[72px] resize-y" value={form.description} onChange={(e) => update("description", e.target.value)} placeholder="Optional product notes..." />

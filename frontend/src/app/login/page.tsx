@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import { useAuth } from "@/context/AuthContext";
 import Link from "next/link";
 import { PRODUCT } from "@/lib/company";
+import { InstallAppHint } from "@/components/pwa/PwaProvider";
 import { prefetchAppRoutes } from "@/lib/appRoutes";
 import { authAPI, publicAPI } from "@/lib/api";
 
@@ -86,7 +87,7 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-4 sm:p-8 bg-brand-50">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-8 pb-28 bg-brand-50">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center gap-3 mb-8">
             <div className="w-12 h-12 rounded-lg bg-brand-900 flex items-center justify-center">
@@ -153,6 +154,9 @@ export default function LoginPage() {
             )}
           </div>
 
+          <div className="mt-6">
+            <InstallAppHint compact />
+          </div>
           <p className="text-center text-xs text-brand-400 mt-6">
             {PRODUCT.name} by Nepatronix
           </p>

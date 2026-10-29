@@ -54,11 +54,11 @@ async function waitForApi() {
   throw new Error(`API not reachable at ${API}. Start the backend (npm run dev) first.`);
 }
 
-async function openShops(label) {
+async function openShops(label, industries = ['hardware', 'hardware']) {
   await mongoose.connect(mongoUri());
   const stamp = `${Date.now().toString(36)}`;
   const shops = [];
-  for (const key of ['alpha', 'bravo']) {
+  for (const [index, key] of ['alpha', 'bravo'].entries()) {
     const email = `${label}-${key}-${stamp}@isolation.invalid`;
     const secret = `SECRET-${key.toUpperCase()}-${stamp}`;
     const { tenant, owner } = await provisionTenant({
@@ -70,6 +70,7 @@ async function openShops(label) {
       status: 'active',
       plan: 'business',
       storageGb: 10,
+      industry: industries[index] || 'hardware',
     });
     const session = createSession(API);
     const login = await session.post('/auth/login', { email, password: PASSWORD });

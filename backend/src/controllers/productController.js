@@ -31,12 +31,15 @@ exports.getProducts = async (req, res) => {
     }
     if (category) query.category = category;
     if (brand) query.brand = brand;
+    if (req.query.pos === '1') {
+      query['attrs.role'] = { $nin: ['colorant', 'ingredient'] };
+    }
     if (lowStock === 'true') {
       query.$expr = { $lte: ['$currentStock', '$minStock'] };
     }
 
     const listKey = !search && lowStock !== 'true'
-      ? tenantKey(['products', 'list', String(category || ''), String(brand || ''), String(page), String(limit)])
+      ? tenantKey(['products', 'list', String(category || ''), String(brand || ''), String(page), String(limit), String(req.query.pos || '')])
       : null;
     if (listKey) {
       const cached = await cacheGet(listKey);
@@ -104,6 +107,9 @@ exports.createProduct = async (req, res) => {
   try {
     const body = { ...req.body };
     delete body.tenantId;
+    if (body.attrs && (typeof body.attrs !== 'object' || Array.isArray(body.attrs))) {
+      delete body.attrs;
+    }
     if (!body.sku || !String(body.sku).trim()) {
       body.sku = generateSku(body.name);
     }
@@ -126,6 +132,9 @@ exports.updateProduct = async (req, res) => {
   try {
     const body = { ...req.body };
     delete body.tenantId;
+    if (body.attrs && (typeof body.attrs !== 'object' || Array.isArray(body.attrs))) {
+      delete body.attrs;
+    }
     // Do not clear SKU from the edit form (field removed from UI)
     if (!body.sku || !String(body.sku).trim()) delete body.sku;
     for (const key of ['purchasePrice', 'sellingPrice', 'wholesalePrice', 'dealerPrice', 'projectPrice', 'minSellingPrice', 'vatRate', 'commissionPercent']) {

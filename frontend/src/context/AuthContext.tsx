@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { authAPI } from "@/lib/api";
+import { hasModule as moduleEnabled, type PartnerLabel, type ShopModules } from "@/lib/industry";
 
 interface User {
   _id: string;
@@ -12,11 +13,15 @@ interface User {
   landingPage: string;
   tenantId?: string | null;
   tenantName?: string | null;
+  tenantSlug?: string | null;
   tenantStatus?: string | null;
   companyName?: string | null;
   mustChangePassword?: boolean;
   impersonating?: boolean;
   impersonatingUntil?: number | null;
+  industry?: string | null;
+  modules?: ShopModules;
+  partnerLabel?: PartnerLabel;
   subscription?: {
     plan: string;
     status: string;
@@ -35,6 +40,7 @@ interface AuthContextType {
   acceptSession: (data: User) => string;
   logout: () => Promise<void>;
   hasPermission: (...perms: string[]) => boolean;
+  hasModule: (name: keyof ShopModules) => boolean;
   refreshUser: () => Promise<void>;
 }
 
@@ -91,8 +97,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return perms.some((p) => user.permissions.includes(p));
   };
 
+  const hasModule = (name: keyof ShopModules) => moduleEnabled(user?.modules, name, user?.industry);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, acceptSession, logout, hasPermission, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, login, acceptSession, logout, hasPermission, hasModule, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

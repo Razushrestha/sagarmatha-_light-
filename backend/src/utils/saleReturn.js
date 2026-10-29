@@ -75,6 +75,7 @@ function allocateReturnLines(saleItems, requestedLines) {
         quantity: take,
         unitPrice: slot.unitPrice,
         subtotal,
+        recipeDeducted: (saleItems[slot.index] || {}).recipeDeducted,
       });
       slot.remaining = round2(slot.remaining - take);
       left = round2(left - take);

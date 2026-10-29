@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const { applyTenantPlugin } = require('./plugins/tenantPlugin');
 
 const saleItemSchema = new mongoose.Schema({
-  product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+  product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
   productName: { type: String, required: true },
   sku: { type: String },
   quantity: { type: Number, required: true, min: 0.01 },
@@ -18,6 +18,21 @@ const saleItemSchema = new mongoose.Schema({
   commissionPercent: { type: Number, default: 0, min: 0, max: 100 },
   commission: { type: Number, default: 0 },
   returnedQuantity: { type: Number, default: 0, min: 0 },
+  tinted: { type: Boolean, default: false },
+  shadeCode: { type: String },
+  modifiers: [{
+    group: { type: String },
+    option: { type: String },
+    priceDelta: { type: Number, default: 0 },
+  }],
+  recipeDeducted: [{
+    product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    productName: { type: String },
+    qty: { type: Number },
+    role: { type: String },
+  }],
+  complimentary: { type: Boolean, default: false },
+  compReason: { type: String },
 });
 
 const paymentSchema = new mongoose.Schema({
@@ -58,6 +73,8 @@ const saleSchema = new mongoose.Schema({
   discount: { type: Number, default: 0 },
   discountType: { type: String, enum: ['percent', 'fixed'], default: 'percent' },
   vatAmount: { type: Number, default: 0 },
+  serviceChargePercent: { type: Number, default: 0 },
+  serviceChargeAmount: { type: Number, default: 0 },
   total: { type: Number, required: true },
   amountPaid: { type: Number, default: 0 },
   amountDue: { type: Number, default: 0 },
@@ -65,6 +82,16 @@ const saleSchema = new mongoose.Schema({
   changeAmount: { type: Number, default: 0 },
   isVatBill: { type: Boolean, default: true },
   notes: { type: String },
+  serviceType: { type: String, enum: ['dine_in', 'takeaway'] },
+  table: { type: mongoose.Schema.Types.ObjectId, ref: 'DiningTable' },
+  splitFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },
+  happyHourPercent: { type: Number, default: 0 },
+  loyaltyStampsAwarded: { type: Number, default: 0 },
+  irdStatus: { type: String, enum: ['skipped', 'queued', 'sent'], default: 'skipped' },
+  irdSyncedAt: { type: Date },
+  fiscalYear: { type: String },
+  folioId: { type: mongoose.Schema.Types.ObjectId, default: null, ref: 'Folio' },
+  shift: { type: mongoose.Schema.Types.ObjectId, ref: 'Shift' },
   warehouse: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
   project: { type: mongoose.Schema.Types.ObjectId, ref: 'Project' },
   validityDate: { type: Date },
@@ -85,5 +112,7 @@ saleSchema.index({ tenantId: 1, type: 1, isHeld: 1, createdAt: -1 });
 saleSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 saleSchema.index({ tenantId: 1, customer: 1, createdAt: -1 });
 saleSchema.index({ tenantId: 1, electrician: 1, createdAt: -1 });
+saleSchema.index({ tenantId: 1, folioId: 1, createdAt: -1 });
+saleSchema.index({ tenantId: 1, table: 1, isHeld: 1 });
 
 module.exports = mongoose.model('Sale', saleSchema);

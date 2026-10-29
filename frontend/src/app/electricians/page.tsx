@@ -9,6 +9,8 @@ import { FormField } from "@/components/ui/FormField";
 import { FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { electricianAPI } from "@/lib/api";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import { useAuth } from "@/context/AuthContext";
+import { DEFAULT_PARTNER_LABEL } from "@/lib/industry";
 import { Plus, Search, Zap, Pencil, Trash2, Phone, MapPin } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -23,6 +25,8 @@ interface Electrician {
 const emptyForm = { name: "", number1: "", number2: "", address: "" };
 
 export default function ElectriciansPage() {
+  const { user, hasModule } = useAuth();
+  const label = user?.partnerLabel || DEFAULT_PARTNER_LABEL;
   const [electricians, setElectricians] = useState<Electrician[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -39,7 +43,7 @@ export default function ElectriciansPage() {
       setElectricians(res.data.data || []);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
-      toast.error(error.response?.data?.message || "Failed to load electricians");
+      toast.error(error.response?.data?.message || `Failed to load ${label.plural.toLowerCase()}`);
     } finally {
       setLoading(false);
     }
@@ -83,10 +87,10 @@ export default function ElectriciansPage() {
       };
       if (editingId) {
         await electricianAPI.update(editingId, payload);
-        toast.success("Electrician updated");
+        toast.success(`${label.singular} updated`);
       } else {
         await electricianAPI.create(payload);
-        toast.success("Electrician added");
+        toast.success(`${label.singular} added`);
       }
       setShowModal(false);
       setForm(emptyForm);
@@ -94,31 +98,34 @@ export default function ElectriciansPage() {
       load();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
-      toast.error(error.response?.data?.message || "Could not save electrician");
+      toast.error(error.response?.data?.message || `Could not save ${label.singular.toLowerCase()}`);
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (item: Electrician) => {
-    if (!window.confirm(`Remove ${item.name} from the electrician list?`)) return;
+    if (!window.confirm(`Remove ${item.name} from the ${label.singular.toLowerCase()} list?`)) return;
     try {
       await electricianAPI.remove(item._id);
-      toast.success("Electrician removed");
+      toast.success(`${label.singular} removed`);
       load();
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
-      toast.error(error.response?.data?.message || "Could not remove electrician");
+      toast.error(error.response?.data?.message || `Could not remove ${label.singular.toLowerCase()}`);
     }
   };
 
   return (
     <DashboardLayout>
       <PageHeader
-        title="Electricians"
+        title={label.plural}
+        subtitle={hasModule("tinting")
+          ? "Painter commission is the same POS item-rate commission used for electricians."
+          : undefined}
         action={
           <button type="button" onClick={openCreate} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Add Electrician
+            <Plus className="w-4 h-4" /> Add {label.singular}
           </button>
         }
       />
@@ -161,7 +168,7 @@ export default function ElectriciansPage() {
                 <tr>
                   <td colSpan={5} className="table-cell text-center py-12 text-gray-400">
                     <Zap className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    No electricians yet. Add your first contact.
+                    No {label.plural.toLowerCase()} yet. Add your first contact.
                   </td>
                 </tr>
               ) : (
@@ -222,7 +229,7 @@ export default function ElectriciansPage() {
       <Modal
         open={showModal}
         onClose={() => setShowModal(false)}
-        title={editingId ? "Edit electrician" : "Add electrician"}
+        title={editingId ? `Edit ${label.singular.toLowerCase()}` : `Add ${label.singular.toLowerCase()}`}
       >
         <form onSubmit={handleSave} className="space-y-4">
           <FormGrid cols={2}>
@@ -260,7 +267,7 @@ export default function ElectriciansPage() {
           <FormActions>
             <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
             <button type="submit" className="btn-primary" disabled={saving}>
-              {saving ? "Saving..." : editingId ? "Save changes" : "Add electrician"}
+              {saving ? "Saving..." : editingId ? "Save changes" : `Add ${label.singular.toLowerCase()}`}
             </button>
           </FormActions>
         </form>

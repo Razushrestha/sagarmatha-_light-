@@ -2,6 +2,7 @@ const Product = require('../models/Product');
 const { StockMovement } = require('../models/Warehouse');
 const { sessionOpts } = require('./mongoTransaction');
 const { getTenantId } = require('./tenantContext');
+const { applyLots } = require('../services/lotService');
 const mongoose = require('mongoose');
 
 function tenantFilter(id) {
@@ -25,6 +26,9 @@ async function changeStock({
   userId,
   notes,
   extraUpdate,
+  lotCost,
+  batchNo,
+  expiry,
 }) {
   const qty = Number(delta) || 0;
   const filter = tenantFilter(productId);
@@ -48,6 +52,18 @@ async function changeStock({
     }
     throw new Error(`Insufficient stock for ${productName || 'item'}.`);
   }
+
+  await applyLots({
+    productId: product._id,
+    warehouseId,
+    delta: qty,
+    type,
+    unitCost: lotCost,
+    batchNo,
+    expiry,
+    sourceId: referenceId,
+    session,
+  });
 
   await StockMovement.create([{
     product: product._id,

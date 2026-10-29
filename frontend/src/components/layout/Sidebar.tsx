@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, ShoppingCart, Package, Truck, Users,
   Calculator, BarChart3, TrendingUp, Shield, UserCog, FolderKanban,
-  Bell, Settings, FileSearch, FileText, Receipt, ChevronLeft, ChevronRight, Zap,
+  Bell, Settings, FileSearch, FileText, Receipt, ChevronLeft, ChevronRight, Zap, Palette, Coffee, Clock, LayoutGrid, Percent, Layers, BedDouble, Sparkles, Moon,
 } from "lucide-react";
 import { PRODUCT, shopMonogram } from "@/lib/company";
 import { useCalendar } from "@/context/CalendarContext";
@@ -13,12 +13,13 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useState } from "react";
 import { NAV_SHORTCUT_HINT } from "@/lib/navShortcuts";
+import type { ShopModules } from "@/lib/industry";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "reports:view" },
   { name: "POS / Sales", href: "/pos", icon: ShoppingCart, permission: "pos:access" },
   { name: "Sales List", href: "/sales", icon: FileSearch, permission: "invoice:read" },
-  { name: "Quotations", href: "/quotations", icon: FileText, permission: "invoice:read" },
+  { name: "Quotations", href: "/quotations", icon: FileText, permission: "invoice:read", module: "quotations" },
   {
     name: "Inventory", icon: Package, permission: "product:read",
     children: [
@@ -46,10 +47,21 @@ const navigation = [
   { name: "Expenses", href: "/expenses", icon: Receipt, permission: "accounting:read" },
   { name: "Reports", href: "/reports", icon: BarChart3, permission: "reports:view" },
   { name: "Analytics", href: "/analytics", icon: TrendingUp, permission: "reports:view" },
-  { name: "Warranty", href: "/warranty", icon: Shield, permission: "product:read" },
-  { name: "Electricians", href: "/electricians", icon: Zap, permission: "customer:read" },
+  { name: "Paint shades", href: "/paint/shades", icon: Palette, permission: "product:read", module: "tinting" },
+  { name: "Batches", href: "/paint/lots", icon: Layers, permission: "product:read", module: "tinting" },
+  { name: "Challans", href: "/paint/challans", icon: Truck, permission: "invoice:read", module: "tinting" },
+  { name: "Recipes", href: "/cafe/recipes", icon: Coffee, permission: "product:read", module: "recipes" },
+  { name: "Tables", href: "/cafe/tables", icon: LayoutGrid, permission: "pos:access", module: "tables" },
+  { name: "Happy hour", href: "/cafe/hours", icon: Percent, permission: "settings:manage", module: "recipes" },
+  { name: "Cash shift", href: "/shifts", icon: Clock, permission: "pos:access", module: "shifts" },
+  { name: "Hotel", href: "/hotel", icon: BedDouble, permission: "hotel:desk", module: "rooms" },
+  { name: "Housekeeping", href: "/hotel/housekeeping", icon: Sparkles, permissions: ["hotel:desk", "hotel:housekeeping"], module: "housekeeping" },
+  { name: "Hotel report", href: "/hotel/report", icon: BarChart3, permissions: ["reports:view", "hotel:desk"], module: "rooms" },
+  { name: "Night audit", href: "/hotel/audit", icon: Moon, permission: "hotel:desk", module: "rooms" },
+  { name: "Warranty", href: "/warranty", icon: Shield, permission: "product:read", module: "warranty" },
+  { name: "Partners", href: "/electricians", icon: Zap, permission: "customer:read", module: "partners", partnerItem: true },
   { name: "Employees", href: "/employees", icon: UserCog, permission: "users:manage" },
-  { name: "Projects", href: "/projects", icon: FolderKanban, permission: "reports:view" },
+  { name: "Projects", href: "/projects", icon: FolderKanban, permission: "reports:view", module: "projects" },
   { name: "Notifications", href: "/notifications", icon: Bell },
   { name: "Settings", href: "/settings", icon: Settings, permission: "settings:manage" },
   { name: "Audit Logs", href: "/audit", icon: FileSearch, permission: "audit:view" },
@@ -94,7 +106,7 @@ interface SidebarProps {
 
 export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen = false, onMobileClose }: SidebarProps) {
   const pathname = usePathname();
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, hasModule } = useAuth();
   const { companyName } = useCalendar();
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const shopName = companyName || user?.companyName || user?.tenantName || PRODUCT.shortName;
@@ -109,9 +121,15 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen = fals
     setExpandedGroups((prev) => (prev.includes(name) ? [] : [name]));
   };
 
-  const filteredNav = navigation.filter(
-    (item) => !item.permission || hasPermission(item.permission)
-  );
+  const partnerLabel = user?.partnerLabel?.plural || "Partners";
+  const filteredNav = navigation
+    .filter((item) => {
+      const perms = item.permissions || (item.permission ? [item.permission] : []);
+      if (!perms.length) return true;
+      return hasPermission(...perms);
+    })
+    .filter((item) => !item.module || hasModule(item.module as keyof ShopModules))
+    .map((item) => (item.partnerItem ? { ...item, name: partnerLabel } : item));
 
   const hideLabels = collapsed && !mobileOpen;
 

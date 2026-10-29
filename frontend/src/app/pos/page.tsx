@@ -4,16 +4,26 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Modal from "@/components/ui/Modal";
-import { productAPI, saleAPI, customerAPI, miscAPI, electricianAPI } from "@/lib/api";
+import { productAPI, saleAPI, customerAPI, miscAPI, electricianAPI, shiftAPI, cafeAPI, hotelAPI } from "@/lib/api";
 import { formatCurrency, cn, getImageUrl, getThumbUrl } from "@/lib/utils";
 import { isWireProduct, lineCommission, productCategoryName, productCommissionPercent } from "@/lib/commission";
 import toast from "react-hot-toast";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart,
-  Banknote, User, UserPlus, Users, X, ScanBarcode, RotateCcw, Package, FileText, Receipt, Warehouse, Zap,
+  Banknote, User, UserPlus, Users, X, ScanBarcode, RotateCcw, Package, FileText, Receipt, Warehouse, Zap, Droplets, Ruler, Clock,
 } from "lucide-react";
 import WarehouseSelect, { pickDefaultWarehouseId } from "@/components/ui/WarehouseSelect";
 import DateInput from "@/components/ui/DateInput";
+import { useAuth } from "@/context/AuthContext";
+import { DEFAULT_PARTNER_LABEL } from "@/lib/industry";
+import MixPaintModal from "@/components/paint/MixPaintModal";
+import CoverageModal from "@/components/paint/CoverageModal";
+import ModifierModal from "@/components/pos/ModifierModal";
+import WasteModal from "@/components/pos/WasteModal";
+import { formatModifiers, hasRecipe, modifierKey, type ModifierGroup, type TicketModifier } from "@/lib/recipe";
+import { cafeBillTotals } from "@/lib/cafeBill";
+import { openKitchenTicket } from "@/lib/kitchenTicket";
+import Link from "next/link";
 
 interface Product {
   _id: string;
@@ -28,11 +38,24 @@ interface Product {
   category?: { _id: string; name: string } | string;
   brand?: { _id: string; name: string } | string;
   commissionPercent?: number;
+  attrs?: {
+    tinted?: boolean;
+    role?: string;
+    shadeCode?: string;
+    recipe?: Array<{ product: string; qty: number; role?: string }>;
+    modifierGroups?: ModifierGroup[];
+  };
 }
 
 interface Category {
   _id: string;
   name: string;
+  relatedProducts?: Product[];
+}
+
+function categoryIdOf(product: Product) {
+  if (!product.category) return "";
+  return typeof product.category === "string" ? product.category : product.category._id;
 }
 
 interface CartItem {
@@ -43,6 +66,9 @@ interface CartItem {
   commission?: number;
   commissionPercent?: number;
   commissionManual?: boolean;
+  modifiers?: TicketModifier[];
+  complimentary?: boolean;
+  compReason?: string;
 }
 
 interface Customer { _id: string; name: string; phone: string; address?: string; outstanding?: number; creditBalance?: number; customerType?: string; }
@@ -176,6 +202,14 @@ function clearPosDraft() {
 
 export default function POSPage() {
   const router = useRouter();
+  const { hasModule, user } = useAuth();
+  const partnersOn = hasModule("partners");
+  const tintingOn = hasModule("tinting");
+  const recipesOn = hasModule("recipes");
+  const shiftsOn = hasModule("shifts");
+  const tablesOn = hasModule("tables");
+  const roomsOn = hasModule("rooms");
+  const partnerLabel = user?.partnerLabel || DEFAULT_PARTNER_LABEL;
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Category[]>([]);
@@ -195,6 +229,13 @@ export default function POSPage() {
   const [billMode, setBillMode] = useState<BillMode | null>(null);
   const [heldSales, setHeldSales] = useState<HeldSale[]>([]);
   const [showHeld, setShowHeld] = useState(false);
+  const [showMix, setShowMix] = useState(false);
+  const [showCoverage, setShowCoverage] = useState(false);
+  const [relatedItems, setRelatedItems] = useState<Product[]>([]);
+  const [coverageNote, setCoverageNote] = useState("");
+  const [serviceType, setServiceType] = useState<"dine_in" | "takeaway">("dine_in");
+  const [showWaste, setShowWaste] = useState(false);
+  const [modifierProduct, setModifierProduct] = useState<Product | null>(null);
   const [showCart, setShowCart] = useState(false);
   const [priceLevel, setPriceLevel] = useState<PriceLevel>("retail");
   const [customerPanel, setCustomerPanel] = useState<CustomerPanel>(null);
@@ -214,6 +255,14 @@ export default function POSPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [includeVat, setIncludeVat] = useState(true);
+  const [serviceChargePercent, setServiceChargePercent] = useState(10);
+  const [vatRate, setVatRate] = useState(13);
+  const [openShift, setOpenShift] = useState<{ _id: string; openingFloat?: number; live?: { expectedCash?: number } } | null>(null);
+  const [tables, setTables] = useState<Array<{ _id: string; name: string; status: string }>>([]);
+  const [tableId, setTableId] = useState("");
+  const [happyHour, setHappyHour] = useState<{ percentOff?: number; name?: string } | null>(null);
+  const [folios, setFolios] = useState<Array<{ _id: string; guestName: string; balance: number }>>([]);
+  const [folioId, setFolioId] = useState("");
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("cash");
   const [payingNow, setPayingNow] = useState(0);
   const [draftReady, setDraftReady] = useState(false);
@@ -259,10 +308,46 @@ export default function POSPage() {
       setWarehouses(list);
       setWarehouseId((prev) => prev || pickDefaultWarehouseId(list));
     }).catch(() => toast.error("Failed to load warehouses"));
-    electricianAPI.getAll({ limit: "200" })
-      .then((r) => setElectricians(r.data.data || []))
-      .catch(() => {});
+    if (partnersOn) {
+      electricianAPI.getAll({ limit: "200" })
+        .then((r) => setElectricians(r.data.data || []))
+        .catch(() => {});
+    }
+  }, [partnersOn]);
+
+  useEffect(() => {
+    miscAPI.getSettings().then((r) => {
+      const data = r.data.data || {};
+      if (Number.isFinite(Number(data.serviceChargePercent))) setServiceChargePercent(Number(data.serviceChargePercent));
+      if (Number.isFinite(Number(data.vatRate))) setVatRate(Number(data.vatRate));
+    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!shiftsOn) return;
+    shiftAPI.current()
+      .then((r) => setOpenShift(r.data.data || null))
+      .catch(() => setOpenShift(null));
+  }, [shiftsOn]);
+
+  useEffect(() => {
+    if (tablesOn) {
+      cafeAPI.getTables().then((r) => setTables(r.data.data || [])).catch(() => {});
+    }
+    if (recipesOn) {
+      cafeAPI.getPriceRules().then((r) => setHappyHour(r.data.active || null)).catch(() => {});
+    }
+    if (roomsOn) {
+      hotelAPI.getStays({ status: "checked_in" }).then((r) => {
+        const rows = (r.data.data || []).filter((stay: { folio?: { _id: string } }) => stay.folio?._id).map((stay: { folio: { _id: string; balance?: number }; guestName: string }) => ({
+          _id: stay.folio._id,
+          guestName: stay.guestName,
+          balance: stay.folio.balance || 0,
+        }));
+        setFolios(rows);
+      }).catch(() => {});
+    }
+  }, [tablesOn, recipesOn, roomsOn]);
 
   useEffect(() => {
     if (customerPanel !== "search") return;
@@ -276,7 +361,7 @@ export default function POSPage() {
   }, [customerSearch, customerPanel]);
 
   const loadProducts = async (q?: string, categoryId?: string, brandId?: string) => {
-    const params: Record<string, string> = { limit: "80" };
+    const params: Record<string, string> = { limit: recipesOn ? "200" : "80", pos: "1" };
     if (q?.trim()) params.search = q.trim();
     const cat = categoryId ?? selectedCategory;
     const br = brandId ?? selectedBrand;
@@ -287,7 +372,7 @@ export default function POSPage() {
   };
 
   const applyFilters = (categoryId: string, brandId: string) => {
-    const params: Record<string, string> = { limit: "80" };
+    const params: Record<string, string> = { limit: recipesOn ? "200" : "80", pos: "1" };
     if (search.trim()) params.search = search.trim();
     if (categoryId) params.category = categoryId;
     if (brandId) params.brand = brandId;
@@ -306,23 +391,44 @@ export default function POSPage() {
 
   const loadHeld = () => saleAPI.getHeld().then((r) => setHeldSales(r.data.data));
 
-  const addToCart = useCallback((product: Product) => {
-    if (product.currentStock <= 0) { toast.error("Out of stock!"); return; }
+  const addToCart = useCallback((product: Product, extras?: { modifiers?: TicketModifier[]; complimentary?: boolean; compReason?: string }) => {
+    const recipe = hasRecipe(product);
+    if (!recipe && product.currentStock <= 0) { toast.error("Out of stock!"); return; }
+    const modifiers = extras?.modifiers || [];
+    const complimentary = Boolean(extras?.complimentary);
+    const unitPrice = complimentary ? 0 : getPrice(product, priceLevel) + modifiers.reduce((sum, row) => sum + (row.priceDelta || 0), 0);
+    const lineKey = `${product._id}|${modifierKey(modifiers)}|${complimentary ? "c" : "p"}`;
     setCart((prev) => {
-      const existing = prev.find((i) => i.product._id === product._id);
+      const existing = prev.find((i) => `${i.product._id}|${modifierKey(i.modifiers)}|${i.complimentary ? "c" : "p"}` === lineKey);
       if (existing) {
-        if (existing.quantity >= product.currentStock) { toast.error("Not enough stock!"); return prev; }
-        return prev.map((i) => i.product._id === product._id ? { ...i, quantity: i.quantity + 1, unitPrice: getPrice(product, priceLevel) } : i);
+        if (!recipe && existing.quantity >= product.currentStock) { toast.error("Not enough stock!"); return prev; }
+        return prev.map((i) => `${i.product._id}|${modifierKey(i.modifiers)}|${i.complimentary ? "c" : "p"}` === lineKey
+          ? { ...i, quantity: i.quantity + 1, unitPrice }
+          : i);
       }
       return [...prev, {
         product,
         quantity: 1,
-        unitPrice: getPrice(product, priceLevel),
+        unitPrice,
         discount: 0,
         commissionPercent: productCommissionPercent(product),
+        modifiers,
+        complimentary,
+        compReason: extras?.compReason,
       }];
     });
-  }, [priceLevel]);
+    const cat = categories.find((row) => row._id === categoryIdOf(product));
+    const extrasRelated = (cat?.relatedProducts || []).filter((row) => row._id !== product._id && row.attrs?.role !== "colorant");
+    if (extrasRelated.length) setRelatedItems(extrasRelated);
+  }, [priceLevel, categories]);
+
+  const pickProduct = (product: Product) => {
+    if (recipesOn && (product.attrs?.modifierGroups || []).length) {
+      setModifierProduct(product);
+      return;
+    }
+    addToCart(product);
+  };
 
   const handlePriceLevelChange = (level: PriceLevel) => {
     setPriceLevel(level);
@@ -345,7 +451,16 @@ export default function POSPage() {
     setCart((prev) => prev.map((item) => {
       if (item.product._id !== productId) return item;
       const newQty = item.quantity + delta;
-      if (newQty > item.product.currentStock) { toast.error("Not enough stock!"); return item; }
+      if (!hasRecipe(item.product) && newQty > item.product.currentStock) { toast.error("Not enough stock!"); return item; }
+      return { ...item, quantity: Math.max(0, newQty) };
+    }).filter((i) => i.quantity > 0));
+  };
+
+  const updateCartQty = (index: number, delta: number) => {
+    setCart((prev) => prev.map((item, i) => {
+      if (i !== index) return item;
+      const newQty = item.quantity + delta;
+      if (!hasRecipe(item.product) && newQty > item.product.currentStock) { toast.error("Not enough stock!"); return item; }
       return { ...item, quantity: Math.max(0, newQty) };
     }).filter((i) => i.quantity > 0));
   };
@@ -394,10 +509,21 @@ export default function POSPage() {
   const grossSubtotal = cart.reduce((s, i) => s + i.unitPrice * i.quantity, 0);
   const subtotal = cart.reduce((s, i) => s + getLineSubtotal(i), 0);
   const lineDiscountTotal = grossSubtotal - subtotal;
-  const taxableAmount = subtotal - (invoiceDiscount > 0 ? subtotal * (invoiceDiscount / 100) : 0);
-  const vatAmount = includeVat ? taxableAmount * 0.13 : 0;
-  const total = taxableAmount + vatAmount;
-  const invoiceDiscountFactor = subtotal > 0 ? taxableAmount / subtotal : 1;
+  const foodAfterDiscount = subtotal - (invoiceDiscount > 0 ? subtotal * (invoiceDiscount / 100) : 0);
+  const cafeBill = recipesOn
+    ? cafeBillTotals({
+      food: foodAfterDiscount,
+      serviceChargePercent,
+      vatRate,
+      includeVat,
+      serviceType,
+    })
+    : null;
+  const taxableAmount = cafeBill ? cafeBill.taxable : foodAfterDiscount;
+  const serviceChargeAmount = cafeBill?.serviceCharge || 0;
+  const vatAmount = cafeBill ? cafeBill.vatAmount : (includeVat ? foodAfterDiscount * 0.13 : 0);
+  const total = cafeBill ? cafeBill.total : foodAfterDiscount + vatAmount;
+  const invoiceDiscountFactor = subtotal > 0 ? foodAfterDiscount / subtotal : 1;
   const cashPaidTotal = payments.filter((p) => p.method !== "credit").reduce((s, p) => s + (p.amount || 0), 0);
   const creditTotal = payments.filter((p) => p.method === "credit").reduce((s, p) => s + (p.amount || 0), 0);
   const paidTotal = cashPaidTotal;
@@ -441,7 +567,7 @@ export default function POSPage() {
       customerName: selectedCustomer?.name,
       customerPhone: selectedCustomer?.phone,
       customerAddress: selectedCustomer?.address,
-      electrician: electricianId || undefined,
+      electrician: partnersOn ? electricianId || undefined : undefined,
       commissionTotal,
       items: cart.map((item) => {
         const lineSubtotal = getLineSubtotal(item);
@@ -463,9 +589,16 @@ export default function POSPage() {
           categoryName,
           commissionPercent,
           commission,
+          tinted: Boolean(item.product.attrs?.tinted),
+          shadeCode: item.product.attrs?.tinted ? item.product.attrs.shadeCode : undefined,
+          modifiers: item.modifiers,
+          complimentary: item.complimentary,
+          compReason: item.compReason,
         };
       }),
-      subtotal: taxableAmount,
+      subtotal: recipesOn ? foodAfterDiscount : taxableAmount,
+      serviceChargePercent: recipesOn ? (serviceType === "takeaway" ? 0 : serviceChargePercent) : undefined,
+      serviceChargeAmount: recipesOn ? serviceChargeAmount : undefined,
       discount: invoiceDiscount,
       discountType: "percent",
       vatAmount: includeVat ? vatAmount : 0,
@@ -476,6 +609,10 @@ export default function POSPage() {
       changeAmount: isHeld ? 0 : change,
       isVatBill: !isEstimate && includeVat,
       warehouse: warehouseId,
+      notes: coverageNote || undefined,
+      serviceType: recipesOn ? serviceType : undefined,
+      table: tablesOn ? tableId || undefined : undefined,
+      folioId: roomsOn ? folioId || undefined : undefined,
     };
   };
 
@@ -483,6 +620,7 @@ export default function POSPage() {
     setCart([]); setSelectedCustomer(null); setInvoiceDiscount(0); setElectricianId("");
     setPayments([{ method: "cash", amount: 0 }]); setShowPayment(false); setBillMode(null); setIncludeVat(true); setSelectedPaymentMethod("cash"); setPayingNow(0);
     setCustomerPanel(null); setNewCustomer(emptyNewCustomer());
+    setRelatedItems([]); setCoverageNote(""); setServiceType("dine_in"); setTableId(""); setFolioId("");
     setCustomerSearch(""); setSearchResults([]);
     clearPosDraft();
     loadProducts(); loadHeld();
@@ -545,6 +683,7 @@ export default function POSPage() {
   };
 
   const beginBill = (mode: BillMode) => {
+    if (shiftsOn && !openShift) return toast.error("Open a cash shift before selling");
     if (!cart.length) return toast.error("Cart is empty");
     if (!warehouseId) return toast.error("Select a warehouse");
     if (requiresCustomer && !selectedCustomer) {
@@ -594,6 +733,18 @@ export default function POSPage() {
         toast.success(`Estimate ${doc.invoiceNumber} created!`);
       } else {
         toast.success(`Invoice ${doc.invoiceNumber} created!`);
+        if (recipesOn) {
+          openKitchenTicket({
+            invoiceNumber: doc.invoiceNumber,
+            serviceType,
+            items: cart.map((item) => ({
+              productName: item.product.name,
+              quantity: item.quantity,
+              modifiers: item.modifiers,
+              complimentary: item.complimentary,
+            })),
+          });
+        }
       }
       router.push(`/sales/${doc._id}/print`);
       resetCart();
@@ -626,7 +777,20 @@ export default function POSPage() {
   return (
     <DashboardLayout>
       <div className="flex flex-col h-[calc(100dvh-7.5rem)] sm:h-[calc(100vh-120px)]">
+        {shiftsOn && !openShift && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 flex items-center justify-between gap-3">
+            <span>Cash shift is closed. Open a float before selling.</span>
+            <Link href="/shifts" className="font-medium underline shrink-0">Open shift</Link>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2 sm:gap-3 mb-3 sm:mb-4 items-center">
+          {shiftsOn && (
+            <Link href="/shifts" className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-700 border border-brand-200 rounded-lg px-2.5 py-2 bg-white hover:bg-brand-50">
+              <Clock className="w-3.5 h-3.5" />
+              {openShift ? `Shift open · ${formatCurrency(openShift.live?.expectedCash ?? openShift.openingFloat ?? 0)}` : "No shift"}
+            </Link>
+          )}
+          {!recipesOn && (
           <div className="flex rounded-lg border border-brand-200 overflow-hidden shrink-0">
             {PRICE_LEVELS.map((pl) => (
               <button
@@ -641,6 +805,7 @@ export default function POSPage() {
               </button>
             ))}
           </div>
+          )}
           <div className="flex items-center gap-1.5 shrink-0">
             <Warehouse className="w-4 h-4 text-brand-500 hidden sm:block" />
             <WarehouseSelect
@@ -651,7 +816,42 @@ export default function POSPage() {
               required
             />
           </div>
-          <div className="relative flex-1">
+          {happyHour && (
+            <span className="text-xs font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-2">
+              {happyHour.name || "Happy hour"} {happyHour.percentOff}% at checkout
+            </span>
+          )}
+          {tablesOn && serviceType === "dine_in" && (
+            <select className="input-field py-2 text-xs w-32" value={tableId} onChange={(e) => setTableId(e.target.value)}>
+              <option value="">No table</option>
+              {tables.map((table) => (
+                <option key={table._id} value={table._id}>{table.name}{table.status === "occupied" ? " · busy" : ""}</option>
+              ))}
+            </select>
+          )}
+          {roomsOn && (
+            <select className="input-field py-2 text-xs w-40" value={folioId} onChange={(e) => setFolioId(e.target.value)}>
+              <option value="">Guest folio</option>
+              {folios.map((folio) => (
+                <option key={folio._id} value={folio._id}>{folio.guestName}</option>
+              ))}
+            </select>
+          )}
+          {recipesOn && (
+            <div className="flex rounded-lg overflow-hidden border border-brand-200 shrink-0">
+              {([{ id: "dine_in", label: "Dine-in" }, { id: "takeaway", label: "Takeaway" }] as const).map((row) => (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setServiceType(row.id)}
+                  className={cn("px-3 py-2 text-xs font-medium", serviceType === row.id ? "bg-brand-900 text-white" : "bg-white text-brand-700")}
+                >
+                  {row.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className={cn("relative", recipesOn ? "w-40 shrink-0" : "flex-1")}>
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input type="text" value={search} onChange={(e) => {
               const value = e.target.value;
@@ -660,14 +860,31 @@ export default function POSPage() {
               productSearchTimer.current = setTimeout(() => loadProducts(value, selectedCategory, selectedBrand), 200);
             }}
               onKeyDown={(e) => e.key === "Enter" && handleBarcodeScan(search)}
-              placeholder="Search products, brand, or scan barcode..." className="input-field pl-10" />
+              placeholder={recipesOn ? "Find drink…" : "Search products, brand, or scan barcode..."} className="input-field pl-10" />
           </div>
+          {recipesOn && (
+            <button type="button" onClick={() => setShowWaste(true)} className="btn-secondary flex items-center gap-2 shrink-0">
+              <Trash2 className="w-4 h-4" /> Waste
+            </button>
+          )}
+          {tintingOn && (
+            <>
+              <button type="button" onClick={() => setShowMix(true)} className="btn-secondary flex items-center gap-2 shrink-0">
+                <Droplets className="w-4 h-4" /> Mix
+              </button>
+              <button type="button" onClick={() => setShowCoverage(true)} className="btn-secondary flex items-center gap-2 shrink-0">
+                <Ruler className="w-4 h-4" /> Coverage
+              </button>
+            </>
+          )}
           <button onClick={() => setShowHeld(true)} className="btn-secondary flex items-center gap-2 shrink-0">
             <RotateCcw className="w-4 h-4" /> Held ({heldSales.length})
           </button>
+          {!recipesOn && (
           <button onClick={() => barcodeRef.current?.focus()} className="btn-secondary flex items-center gap-2 shrink-0">
             <ScanBarcode className="w-4 h-4" /> Scan
           </button>
+          )}
           <button
             type="button"
             onClick={() => setShowCart(true)}
@@ -715,6 +932,7 @@ export default function POSPage() {
             </button>
           ))}
         </div>
+        {!recipesOn && (
         <div className="flex gap-2 mb-4 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
           <button
             type="button"
@@ -744,13 +962,50 @@ export default function POSPage() {
             </button>
           ))}
         </div>
+        )}
+        {(() => {
+          const extras = (categories.find((row) => row._id === selectedCategory)?.relatedProducts || [])
+            .filter((row) => row.attrs?.role !== "colorant");
+          if (!extras.length) return null;
+          return (
+            <div className="flex gap-2 mb-3 overflow-x-auto pb-0.5 items-center">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-brand-400 shrink-0">Also sell</span>
+              {extras.map((row) => (
+                <button
+                  key={row._id}
+                  type="button"
+                  disabled={row.currentStock <= 0}
+                  onClick={() => addToCart(row)}
+                  className="px-3 py-1.5 text-xs rounded-full border border-brand-200 bg-white hover:bg-brand-50 shrink-0 disabled:opacity-40"
+                >
+                  {row.name}
+                </button>
+              ))}
+            </div>
+          );
+        })()}
 
         <div className="flex-1 overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+            {recipesOn && !selectedCategory && !search.trim() ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                {categories.map((cat) => (
+                  <button
+                    key={cat._id}
+                    type="button"
+                    onClick={() => handleCategoryChange(cat._id)}
+                    className="card p-6 text-left hover:border-brand-300 hover:shadow-md min-h-[120px]"
+                  >
+                    <p className="text-lg font-semibold text-brand-900">{cat.name}</p>
+                    <p className="text-xs text-brand-400 mt-2">Open category</p>
+                  </button>
+                ))}
+              </div>
+            ) : (
+            <div className={cn("grid gap-4", recipesOn ? "grid-cols-2 md:grid-cols-3 xl:grid-cols-4" : "grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5")}>
               {products.map((p) => {
                 const inCart = getCartQty(p._id);
-                const stock = stockStatus(p.currentStock);
-                const outOfStock = p.currentStock <= 0;
+                const stock = hasRecipe(p) ? { label: "Recipe", className: "bg-brand-100 text-brand-700" } : stockStatus(p.currentStock);
+                const outOfStock = !hasRecipe(p) && p.currentStock <= 0;
                 const thumb = p.images?.[0];
 
                 return (
@@ -811,6 +1066,14 @@ export default function POSPage() {
                           >
                             Unavailable
                           </button>
+                        ) : recipesOn ? (
+                          <button
+                            type="button"
+                            onClick={() => pickProduct(p)}
+                            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md bg-brand-900 text-white hover:bg-brand-800"
+                          >
+                            Add
+                          </button>
                         ) : inCart > 0 ? (
                           <div className="flex items-center gap-1 shrink-0">
                             <button
@@ -852,8 +1115,9 @@ export default function POSPage() {
                 );
               })}
             </div>
+            )}
 
-            {products.length === 0 && (
+            {products.length === 0 && !(recipesOn && !selectedCategory && !search.trim()) && (
               <div className="flex flex-col items-center justify-center h-48 text-brand-400">
                 <Package className="w-10 h-10 mb-2 opacity-50" />
                 <p className="text-sm">No products found</p>
@@ -870,15 +1134,41 @@ export default function POSPage() {
           </div>
         ) : (
           <div className="space-y-5">
-            <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_100px_80px_110px_110px_40px] gap-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-brand-400">
+            <div className={cn(
+              "hidden sm:grid gap-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-brand-400",
+              partnersOn
+                ? "grid-cols-[minmax(0,1fr)_100px_80px_110px_110px_40px]"
+                : "grid-cols-[minmax(0,1fr)_100px_80px_110px_40px]"
+            )}>
               <span>Product</span>
               <span className="text-center">Quantity</span>
               <span className="text-center">Disc %</span>
               <span className="text-right">Amount</span>
-              <span className="text-center">Commission</span>
+              {partnersOn && <span className="text-center">Commission</span>}
               <span />
             </div>
 
+            {coverageNote && (
+              <p className="text-sm text-brand-700 bg-brand-50 border border-brand-100 rounded-lg px-3 py-2">{coverageNote}</p>
+            )}
+            {relatedItems.filter((row) => !cart.some((item) => item.product._id === row._id)).length > 0 && (
+              <div className="rounded-xl border border-brand-100 p-3 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-brand-400">Also sell</p>
+                <div className="flex flex-wrap gap-2">
+                  {relatedItems.filter((row) => !cart.some((item) => item.product._id === row._id)).map((row) => (
+                    <button
+                      key={row._id}
+                      type="button"
+                      disabled={row.currentStock <= 0}
+                      onClick={() => addToCart(row)}
+                      className="px-3 py-1.5 text-xs rounded-full border border-brand-200 bg-white hover:bg-brand-50 disabled:opacity-40"
+                    >
+                      {row.name} · {formatCurrency(getPrice(row, priceLevel))}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="max-h-[50vh] overflow-y-auto space-y-3 pr-1">
               {cart.map((item, index) => {
                 const lineTotal = getLineSubtotal(item);
@@ -886,7 +1176,12 @@ export default function POSPage() {
                 const wire = isWireProduct(item.product);
                 const thumb = item.product.images?.[0];
                 return (
-                  <div key={item.product._id} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_100px_80px_110px_110px_40px] gap-3 items-center p-4 rounded-xl border border-brand-100 bg-brand-50/40">
+                  <div key={item.product._id} className={cn(
+                    "grid grid-cols-1 gap-3 items-center p-4 rounded-xl border border-brand-100 bg-brand-50/40",
+                    partnersOn
+                      ? "sm:grid-cols-[minmax(0,1fr)_100px_80px_110px_110px_40px]"
+                      : "sm:grid-cols-[minmax(0,1fr)_100px_80px_110px_40px]"
+                  )}>
                     <div className="flex items-center gap-4 min-w-0">
                       <div className="w-14 h-14 rounded-lg bg-white border border-brand-200 flex items-center justify-center shrink-0 overflow-hidden">
                         {thumb ? (
@@ -906,6 +1201,15 @@ export default function POSPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-brand-900 leading-snug">{item.product.name}</p>
+                        {item.modifiers && item.modifiers.length > 0 && (
+                          <p className="text-[11px] text-brand-500 mt-0.5">{formatModifiers(item.modifiers)}</p>
+                        )}
+                        {item.complimentary && (
+                          <p className="text-[11px] text-amber-700 mt-0.5">Comp · {item.compReason}</p>
+                        )}
+                        {item.product.attrs?.tinted && (
+                          <p className="text-[11px] text-amber-700 mt-0.5">Tinted · not returnable</p>
+                        )}
                         {productBrandName(item.product) && (
                           <p className="text-[11px] text-brand-500 mt-0.5">{productBrandName(item.product)}</p>
                         )}
@@ -920,18 +1224,21 @@ export default function POSPage() {
 
                     <div className="flex items-center justify-center gap-1.5 sm:justify-center">
                       <span className="sm:hidden text-xs text-brand-500 w-16">Qty</span>
-                      <button type="button" onClick={() => updateQuantity(item.product._id, -1)} className="w-8 h-8 rounded-md bg-white border border-brand-200 flex items-center justify-center hover:bg-brand-50">
+                      <button type="button" onClick={() => updateCartQty(index, -1)} className="w-8 h-8 rounded-md bg-white border border-brand-200 flex items-center justify-center hover:bg-brand-50">
                         <Minus className="w-3.5 h-3.5" />
                       </button>
                       <input
                         type="number"
                         min={1}
-                        max={item.product.currentStock}
+                        max={hasRecipe(item.product) ? undefined : item.product.currentStock}
                         value={item.quantity}
-                        onChange={(e) => setQuantity(item.product._id, Number(e.target.value))}
+                        onChange={(e) => {
+                          const qty = Math.max(0, Number(e.target.value) || 0);
+                          setCart((prev) => prev.map((row, i) => i === index ? { ...row, quantity: qty } : row).filter((row) => row.quantity > 0));
+                        }}
                         className="w-12 h-8 text-center text-sm font-semibold border border-brand-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-brand-900/10"
                       />
-                      <button type="button" onClick={() => updateQuantity(item.product._id, 1)} className="w-8 h-8 rounded-md bg-white border border-brand-200 flex items-center justify-center hover:bg-brand-50">
+                      <button type="button" onClick={() => updateCartQty(index, 1)} className="w-8 h-8 rounded-md bg-white border border-brand-200 flex items-center justify-center hover:bg-brand-50">
                         <Plus className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -954,6 +1261,7 @@ export default function POSPage() {
                       {formatCurrency(lineTotal)}
                     </p>
 
+                    {partnersOn && (
                     <div className="flex flex-col items-center gap-1">
                       <span className="sm:hidden text-xs text-brand-500">Commission</span>
                       <input
@@ -982,6 +1290,7 @@ export default function POSPage() {
                         </div>
                       )}
                     </div>
+                    )}
 
                     <button type="button" onClick={() => setCart(cart.filter((c) => c.product._id !== item.product._id))} className="text-brand-400 hover:text-brand-800 justify-self-end sm:justify-self-center">
                       <Trash2 className="w-4 h-4" />
@@ -1008,8 +1317,14 @@ export default function POSPage() {
               )}
               <div className="flex justify-between text-sm items-center">
                 <span className="text-brand-500">Invoice Discount (%)</span>
-                <input type="number" value={invoiceDiscount} onChange={(e) => setInvoiceDiscount(Number(e.target.value))} className="w-20 input-field py-1.5 text-sm text-center" min={0} max={100} />
+                <input type="number" value={invoiceDiscount} onChange={(e) => setInvoiceDiscount(Number(e.target.value))} className="w-20 input-field py-1.5 text-sm text-center" min={0} max={100} step="any" />
               </div>
+              {recipesOn && serviceChargeAmount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-brand-500">Service charge ({serviceChargePercent}%)</span>
+                  <span>{formatCurrency(serviceChargeAmount)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-brand-500">Taxable Amount</span>
                 <span>{formatCurrency(taxableAmount)}</span>
@@ -1048,13 +1363,15 @@ export default function POSPage() {
                 <span>Total</span>
                 <span>{formatCurrency(total)}</span>
               </div>
+              {partnersOn && (
               <div className="flex justify-between text-sm">
                 <span className="text-brand-500">
                   Total commission
-                  {!electricianId && " — select electrician to save"}
+                  {!electricianId && ` — select ${partnerLabel.singular.toLowerCase()} to save`}
                 </span>
                 <span className="font-medium">{formatCurrency(commissionTotal)}</span>
               </div>
+              )}
             </div>
 
             <div className="p-4 border border-brand-100 rounded-xl bg-white space-y-3">
@@ -1071,12 +1388,13 @@ export default function POSPage() {
                   required
                 />
               </div>
+              {partnersOn && (
               <div className="flex items-center justify-between gap-3 pb-3 border-b border-brand-100">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-brand-500 flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5" /> Electrician
+                    <Zap className="w-3.5 h-3.5" /> {partnerLabel.singular}
                   </p>
-                  <p className="text-[11px] text-brand-400 mt-0.5">Saved on the electrician account, not printed on the bill</p>
+                  <p className="text-[11px] text-brand-400 mt-0.5">Saved on the {partnerLabel.singular.toLowerCase()} account, not printed on the bill</p>
                 </div>
                 <select
                   value={electricianId}
@@ -1091,6 +1409,7 @@ export default function POSPage() {
                   ))}
                 </select>
               </div>
+              )}
               {selectedCustomer ? (
                 <div className="flex justify-between items-start gap-3">
                   <div className="flex items-start gap-3 min-w-0">
@@ -1406,6 +1725,53 @@ export default function POSPage() {
         )}
       </Modal>
 
+      {tintingOn && (
+        <>
+          <MixPaintModal
+            open={showMix}
+            onClose={() => setShowMix(false)}
+            warehouseId={warehouseId}
+            onMixed={(product) => {
+              addToCart(product as Product);
+              setShowCart(true);
+            }}
+          />
+          <CoverageModal
+            open={showCoverage}
+            onClose={() => setShowCoverage(false)}
+            onUseQuote={(text) => {
+              setCoverageNote(text);
+              setShowCart(true);
+            }}
+          />
+        </>
+      )}
+
+      {recipesOn && (
+        <>
+          <ModifierModal
+            open={Boolean(modifierProduct)}
+            productName={modifierProduct?.name || ""}
+            basePrice={modifierProduct ? getPrice(modifierProduct, priceLevel) : 0}
+            groups={modifierProduct?.attrs?.modifierGroups || []}
+            onClose={() => setModifierProduct(null)}
+            onAdd={(payload) => {
+              if (!modifierProduct) return;
+              addToCart(modifierProduct, payload);
+              setModifierProduct(null);
+              setShowCart(true);
+            }}
+          />
+          <WasteModal
+            open={showWaste}
+            products={products}
+            warehouseId={warehouseId}
+            onClose={() => setShowWaste(false)}
+            onBooked={() => loadProducts()}
+          />
+        </>
+      )}
+
       <Modal open={showHeld} onClose={() => setShowHeld(false)} title="Held Sales" size="md">
         {heldSales.length === 0 ? <p className="text-gray-400 text-center py-8">No held sales</p> : (
           <div className="space-y-2">
@@ -1414,6 +1780,9 @@ export default function POSPage() {
                 <div>
                   <p className="font-medium">{h.invoiceNumber}</p>
                   <p className="text-xs text-gray-400">{h.customerName || "Walk-in"} · {h.items.length} items</p>
+                  {recipesOn && (
+                    <a href={`/sales/${h._id}/split`} className="text-xs text-brand-700">Split bill</a>
+                  )}
                 </div>
                 <div className="text-right">
                   <p className="font-bold text-brand-700">{formatCurrency(h.total)}</p>

@@ -8,6 +8,7 @@ import PlatformLayout from "@/components/layout/PlatformLayout";
 import { platformAPI } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { ArrowLeft } from "lucide-react";
+import { INDUSTRIES, INDUSTRY_LABELS } from "@/lib/industry";
 
 interface TenantDetail {
   _id: string;
@@ -15,6 +16,7 @@ interface TenantDetail {
   slug: string;
   status: string;
   plan: string;
+  industry?: string;
   notes?: string;
   paymentNote?: string;
   storageGb?: number;
@@ -60,6 +62,7 @@ export default function TenantDetailPage() {
   const { refreshUser } = useAuth();
   const [tenant, setTenant] = useState<TenantDetail | null>(null);
   const [plan, setPlan] = useState("business");
+  const [industry, setIndustry] = useState("hardware");
   const [storageGb, setStorageGb] = useState(10);
   const [notes, setNotes] = useState("");
   const [trialEndsAt, setTrialEndsAt] = useState(inputDate(null, 3));
@@ -90,6 +93,7 @@ export default function TenantDetailPage() {
   const applyTenant = (data: TenantDetail) => {
     setTenant(data);
     setPlan(data.plan);
+    setIndustry(data.industry || "hardware");
     setStorageGb(data.storageGb || data.subscription?.limits.storageGb || 10);
     setNotes(data.notes || "");
     setTrialEndsAt(inputDate(data.trialEndsAt || data.subscription?.trialEndsAt, 3));
@@ -122,7 +126,7 @@ export default function TenantDetailPage() {
   };
 
   const save = () => run("save", async () => {
-    const res = await platformAPI.updateTenant(id, { plan, notes, storageGb });
+    const res = await platformAPI.updateTenant(id, { plan, notes, storageGb, industry });
     applyTenant({ ...tenant!, ...res.data.data });
     toast.success("Saved");
   });
@@ -262,6 +266,12 @@ export default function TenantDetailPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 space-y-3">
           <h2 className="font-semibold text-slate-900">Plan & notes</h2>
+          <select className="platform-input" value={industry} onChange={(e) => setIndustry(e.target.value)}>
+            {INDUSTRIES.map((value) => (
+              <option key={value} value={value}>{INDUSTRY_LABELS[value]}</option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-500">Changing type resets modules (partners, warranty, quotations, projects).</p>
           <select className="platform-input" value={plan} onChange={(e) => setPlan(e.target.value)}>
             <option value="starter">Starter</option>
             <option value="business">Business</option>

@@ -12,9 +12,16 @@
     "backup-mongo": "node scripts/backup-mongo.js",
     "restore-mongo": "node scripts/restore-mongo.js",
     "test-restore-mongo": "node scripts/test-restore-mongo.js",
-    "test:isolation": "node scripts/isolation-smoke.js && node scripts/isolation-bot.js",
+    "test:isolation": "node scripts/isolation-smoke.js && node scripts/isolation-bot.js && node scripts/isolation-industry.js",
     "test:isolation-smoke": "node scripts/isolation-smoke.js",
-    "test:isolation-bot": "node scripts/isolation-bot.js"
+    "test:isolation-bot": "node scripts/isolation-bot.js",
+    "test:isolation-industry": "node scripts/isolation-industry.js",
+    "test:cafe-bill": "node scripts/cafe-bill-check.js",
+    "test:posting": "node scripts/posting-check.js",
+    "test:later-phases": "node scripts/later-phases-check.js",
+    "test:ledger": "node scripts/ledger-check.js",
+    "sample-catalogs": "node scripts/sample-catalogs.js",
+    "eod-report": "node scripts/eod-report.js"
   },
   "keywords": [
     "erp",

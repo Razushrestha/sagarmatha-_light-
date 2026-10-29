@@ -31,6 +31,9 @@ const typeLabels: Record<string, { label: string; color: string }> = {
   adjustment_plus: { label: "Adjustment +", color: "badge" },
   adjustment_minus: { label: "Adjustment -", color: "badge" },
   damage: { label: "Damage", color: "badge" },
+  waste: { label: "Waste", color: "badge" },
+  mix_in: { label: "Mix in", color: "badge" },
+  mix_out: { label: "Mix out", color: "badge" },
 };
 
 export default function MovementsPage() {

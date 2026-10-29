@@ -26,7 +26,7 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401 && typeof window !== "undefined") {
       const path = window.location.pathname;
-      if (!path.includes("/login") && !path.includes("/signup") && !path.includes("/change-password")) {
+      if (!path.includes("/login") && !path.includes("/signup") && !path.includes("/change-password") && !path.startsWith("/book")) {
         window.location.href = "/login";
       }
     }
@@ -83,6 +83,7 @@ export const saleAPI = {
   getDashboard: () => api.get("/sales/dashboard"),
   getHeld: () => api.get("/sales/held"),
   completeHeld: (id: string, data: object) => api.put(`/sales/${id}/complete`, data),
+  split: (id: string, data: object) => api.post(`/sales/${id}/split`, data),
   convertToSale: (id: string, data?: object) => api.post(`/sales/${id}/convert`, data),
   createReturn: (id: string, data: object) => api.post(`/sales/${id}/return`, data),
   createReturnsBatch: (data: object) => api.post("/sales/returns/batch", data),
@@ -101,6 +102,81 @@ export const customerAPI = {
   getLedger: (id: string) => api.get(`/customers/${id}/ledger`),
   receivePayment: (id: string, data: object) => api.post(`/customers/${id}/payments`, data),
   refundCredit: (id: string, data: object) => api.post(`/customers/${id}/credit/refund`, data),
+};
+
+export const cafeAPI = {
+  getMenu: () => api.get("/cafe/menu"),
+  getMargins: () => api.get("/cafe/margins"),
+  saveRecipe: (id: string, data: object) => api.put(`/cafe/recipes/${id}`, data),
+  bookWaste: (data: object) => api.post("/cafe/waste", data),
+  getTables: () => api.get("/cafe/tables"),
+  createTable: (data: object) => api.post("/cafe/tables", data),
+  updateTable: (id: string, data: object) => api.put(`/cafe/tables/${id}`, data),
+  getPriceRules: () => api.get("/cafe/price-rules"),
+  savePriceRule: (data: object) => api.post("/cafe/price-rules", data),
+  updatePriceRule: (id: string, data: object) => api.put(`/cafe/price-rules/${id}`, data),
+  removePriceRule: (id: string) => api.delete(`/cafe/price-rules/${id}`),
+};
+
+export const shiftAPI = {
+  current: () => api.get("/shifts/current"),
+  list: () => api.get("/shifts"),
+  open: (data: object) => api.post("/shifts/open", data),
+  close: (id: string, data: object) => api.post(`/shifts/${id}/close`, data),
+};
+
+export const paintAPI = {
+  getShades: (params?: Record<string, string>) => api.get("/paint/shades", { params }),
+  createShade: (data: object) => api.post("/paint/shades", data),
+  updateShade: (id: string, data: object) => api.put(`/paint/shades/${id}`, data),
+  removeShade: (id: string) => api.delete(`/paint/shades/${id}`),
+  previewMix: (data: { shadeId: string; packLitres: number }) => api.post("/paint/mix/preview", data),
+  mix: (data: { shadeId: string; packLitres: number; warehouseId?: string }) => api.post("/paint/mix", data),
+  getLots: (params?: Record<string, string>) => api.get("/paint/lots", { params }),
+  getChallans: () => api.get("/paint/challans"),
+  getChallan: (id: string) => api.get(`/paint/challans/${id}`),
+  createChallan: (data: object) => api.post("/paint/challans", data),
+  dispatchChallan: (id: string, data?: object) => api.post(`/paint/challans/${id}/dispatch`, data),
+  deliverChallan: (id: string) => api.post(`/paint/challans/${id}/deliver`),
+};
+
+export const hotelAPI = {
+  getRooms: () => api.get("/hotel/rooms"),
+  saveRoom: (data: object) => api.post("/hotel/rooms", data),
+  updateRoom: (id: string, data: object) => api.put(`/hotel/rooms/${id}`, data),
+  setRoomStatus: (id: string, data: object) => api.post(`/hotel/rooms/${id}/status`, data),
+  getStays: (params?: Record<string, string>) => api.get("/hotel/stays", { params }),
+  getRack: (params?: Record<string, string>) => api.get("/hotel/rack", { params }),
+  checkIn: (data: object) => api.post("/hotel/stays/check-in", data),
+  reserve: (data: object) => api.post("/hotel/stays/reserve", data),
+  arrive: (id: string, data?: object) => api.post(`/hotel/stays/${id}/arrive`, data),
+  updateGuest: (id: string, data: object) => api.put(`/hotel/stays/${id}/guest`, data),
+  cancelStay: (id: string, data?: object) => api.post(`/hotel/stays/${id}/cancel`, data),
+  noShow: (id: string, data?: object) => api.post(`/hotel/stays/${id}/no-show`, data),
+  checkOut: (id: string, data?: object) => api.post(`/hotel/stays/${id}/check-out`, data),
+  getFolio: (id: string) => api.get(`/hotel/folios/${id}`),
+  settleFolio: (id: string, data: object) => api.post(`/hotel/folios/${id}/settle`, data),
+  depositFolio: (id: string, data: object) => api.post(`/hotel/folios/${id}/deposit`, data),
+  cityLedgerFolio: (id: string, data: object) => api.post(`/hotel/folios/${id}/city-ledger`, data),
+  emailFolio: (id: string, data: object) => api.post(`/hotel/folios/${id}/email`, data),
+  extendStay: (id: string, data: object) => api.post(`/hotel/stays/${id}/extend`, data),
+  moveStay: (id: string, data: object) => api.post(`/hotel/stays/${id}/move`, data),
+  changeRate: (id: string, data: object) => api.post(`/hotel/stays/${id}/rate`, data),
+  getReport: (params?: Record<string, string>) => api.get("/hotel/report", { params }),
+  getAudit: () => api.get("/hotel/audit"),
+  closeNight: (data?: object) => api.post("/hotel/audit/close", data),
+  reopenNight: (id: string) => api.post(`/hotel/audit/${id}/reopen`),
+  splitFolio: (id: string, data: object) => api.post(`/hotel/folios/${id}/split`, data),
+  moveFolioCharge: (id: string, data: object) => api.post(`/hotel/folios/${id}/move`, data),
+  getStaff: () => api.get("/hotel/staff"),
+  searchGuests: (q: string) => api.get("/hotel/guests", { params: { q } }),
+  getRatePlans: () => api.get("/hotel/rates"),
+  saveRatePlan: (data: object) => api.post("/hotel/rates", data),
+  updateRatePlan: (id: string, data: object) => api.put(`/hotel/rates/${id}`, data),
+  quoteRate: (params: Record<string, string>) => api.get("/hotel/rates/quote", { params }),
+  getChannel: () => api.get("/hotel/channel"),
+  createChannel: (data: object) => api.post("/hotel/channel", data),
+  importChannel: (id: string, data: object) => api.post(`/hotel/channel/${id}/import`, data),
 };
 
 export const electricianAPI = {
@@ -183,6 +259,8 @@ export const inventoryAPI = {
 export const publicAPI = {
   signup: (data: object) => api.post("/public/signup", data),
   config: () => api.get("/public/config"),
+  hotelWidget: (slug: string) => api.get(`/public/hotel/${slug}`),
+  hotelBook: (slug: string, data: object) => api.post(`/public/hotel/${slug}/book`, data),
 };
 
 export const platformAPI = {

@@ -8,6 +8,7 @@ const { createAuditLog } = require('../middleware/audit');
 const { cookieOptions } = require('../config/env');
 const { runWithTenant } = require('../utils/tenantContext');
 const { shopLoginBlocked, assertUserLimit, subscriptionSnapshot } = require('../services/planService');
+const { industryProfile } = require('../config/industry');
 
 const WEAK_PASSWORDS = new Set(['admin123', 'password', '123456', 'nepatronix', 'changeme']);
 
@@ -43,12 +44,14 @@ async function authPayload(user, tenant) {
     role: user.role,
     tenantId: user.tenantId || tenant?._id || null,
     tenantName: tenant?.name || null,
+    tenantSlug: tenant?.slug || null,
     tenantStatus: tenant?.status || null,
     companyName,
     mustChangePassword,
     permissions: user.permissions?.length ? user.permissions : roleConfig?.permissions || [],
     landingPage: mustChangePassword ? '/change-password' : (roleConfig?.landingPage || '/dashboard'),
     subscription: tenant ? await subscriptionSnapshot(tenant) : null,
+    ...industryProfile(tenant),
   };
 }
 

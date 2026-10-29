@@ -6,6 +6,7 @@ const categorySchema = new mongoose.Schema({
   description: { type: String },
   parent: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
   image: { type: String },
+  relatedProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });
 

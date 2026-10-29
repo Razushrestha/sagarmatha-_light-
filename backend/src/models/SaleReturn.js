@@ -10,6 +10,12 @@ const returnItemSchema = new mongoose.Schema({
   subtotal: { type: Number, required: true },
   originalSale: { type: mongoose.Schema.Types.ObjectId, ref: 'Sale' },
   invoiceNumber: { type: String },
+  recipeDeducted: [{
+    product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+    productName: { type: String },
+    qty: { type: Number },
+    role: { type: String },
+  }],
 });
 
 const saleReturnSchema = new mongoose.Schema({

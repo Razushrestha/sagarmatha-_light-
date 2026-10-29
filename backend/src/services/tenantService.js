@@ -6,6 +6,7 @@ const { Unit } = require('../models/Unit');
 const { Account } = require('../models/Account');
 const { runWithTenant } = require('../utils/tenantContext');
 const { trialPeriodEnd, PLAN_LIMITS } = require('./planService');
+const { normalizeIndustry, modulesFor } = require('../config/industry');
 
 const DEFAULT_UNITS = [
   { name: 'Piece', shortName: 'Pcs' },
@@ -14,6 +15,9 @@ const DEFAULT_UNITS = [
   { name: 'Box', shortName: 'Box' },
   { name: 'Roll', shortName: 'Roll' },
   { name: 'Kilogram', shortName: 'Kg' },
+  { name: 'Gram', shortName: 'g' },
+  { name: 'Litre', shortName: 'L' },
+  { name: 'Millilitre', shortName: 'ml' },
   { name: 'Set', shortName: 'Set' },
   { name: 'Pair', shortName: 'Pair' },
 ];
@@ -28,6 +32,7 @@ const DEFAULT_ACCOUNTS = [
   { code: '2102', name: 'VAT Input', type: 'tax', isSystem: true },
   { code: '3001', name: 'Owner Capital', type: 'equity', isSystem: true },
   { code: '4001', name: 'Sales Revenue', type: 'income', isSystem: true },
+  { code: '4002', name: 'Service Charge', type: 'income', isSystem: true },
   { code: '5001', name: 'Cost of Goods Sold', type: 'cogs', isSystem: true },
   { code: '6001', name: 'Rent Expense', type: 'expense', isSystem: true },
   { code: '6002', name: 'Salary Expense', type: 'expense', isSystem: true },
@@ -64,14 +69,18 @@ async function provisionTenant({
   plan = 'starter',
   storageGb,
   company,
+  industry = 'hardware',
 }) {
   const planDefaults = PLAN_LIMITS[plan] || PLAN_LIMITS.starter;
   const quota = [10, 30, 50, 100].includes(Number(storageGb)) ? Number(storageGb) : planDefaults.storageGb;
+  const shopIndustry = normalizeIndustry(industry);
   const tenant = await Tenant.create({
     name,
     slug: slug || await uniqueSlug(name),
     status,
     plan,
+    industry: shopIndustry,
+    modules: modulesFor(shopIndustry),
     storageGb: quota,
     trialEndsAt: status === 'trial' ? trialPeriodEnd() : undefined,
   });
@@ -93,6 +102,7 @@ async function provisionTenant({
       email: company?.email || email,
       vatNumber: company?.vatNumber || '',
       vatRate: 13,
+      serviceChargePercent: 10,
       calendarType: 'bs',
       paymentMethods: [
         { name: 'Cash', enabled: true },

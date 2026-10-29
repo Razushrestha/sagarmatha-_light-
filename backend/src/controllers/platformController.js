@@ -146,7 +146,7 @@ function publicUser(user) {
 
 exports.signup = async (req, res) => {
   try {
-    const { shopName, name, email, password, phone } = req.body;
+    const { shopName, name, email, password, phone, industry } = req.body;
     if (!shopName || !name || !email || !password) {
       return res.status(400).json({ success: false, message: 'Shop name, your name, email and password are required.' });
     }
@@ -173,6 +173,7 @@ exports.signup = async (req, res) => {
       status: 'trial',
       plan: defaults.defaultPlan || 'starter',
       storageGb: defaults.defaultStorageGb || 10,
+      industry,
     });
 
     res.status(201).json({
@@ -201,7 +202,7 @@ exports.exportTenants = async (req, res) => {
   try {
     const { data } = await loadShopRows(req);
     const header = [
-      'Shop', 'Slug', 'Status', 'Billing', 'Plan', 'Owner name', 'Owner email', 'Owner phone',
+      'Shop', 'Slug', 'Status', 'Industry', 'Billing', 'Plan', 'Owner name', 'Owner email', 'Owner phone',
       'Trial ends', 'Paid until', 'Last payment', 'Payment notes',
       'Last login', 'Last invoice', 'Last invoice no', 'Storage GB used', 'Storage GB limit', 'Created',
     ];
@@ -212,6 +213,7 @@ exports.exportTenants = async (req, res) => {
         row.name,
         row.slug,
         row.status,
+        row.industry || 'hardware',
         row.billing,
         row.plan,
         row.owner?.name || '',
@@ -248,6 +250,7 @@ exports.getTenant = async (req, res) => {
       success: true,
       data: {
         ...tenant,
+        ...require('../config/industry').industryProfile(tenant),
         paymentNotes: tenant.paymentNote || '',
         users,
         subscription: await subscriptionSnapshot(tenant),
@@ -261,7 +264,7 @@ exports.getTenant = async (req, res) => {
 
 exports.createTenant = async (req, res) => {
   try {
-    const { shopName, name, email, password, phone, plan, status, storageGb } = req.body;
+    const { shopName, name, email, password, phone, plan, status, storageGb, industry } = req.body;
     if (!shopName || !name || !email || !password) {
       return res.status(400).json({ success: false, message: 'Shop name, owner name, email and password are required.' });
     }
@@ -279,6 +282,7 @@ exports.createTenant = async (req, res) => {
       status: status || 'active',
       plan: plan || defaults.defaultPlan || 'business',
       storageGb: storageGb || defaults.defaultStorageGb,
+      industry,
     });
     res.status(201).json({ success: true, data: { tenant, owner: publicUser(owner) } });
   } catch (error) {
@@ -290,7 +294,7 @@ exports.updateTenant = async (req, res) => {
   try {
     const tenant = await Tenant.findById(req.params.id);
     if (!tenant) return res.status(404).json({ success: false, message: 'Shop not found.' });
-    const { name, status, plan, notes, storageGb } = req.body;
+    const { name, status, plan, notes, storageGb, industry } = req.body;
     if (name) tenant.name = String(name).trim();
     if (status && ['trial', 'active', 'suspended', 'archived'].includes(status)) {
       tenant.status = status;
@@ -299,6 +303,14 @@ exports.updateTenant = async (req, res) => {
       }
     }
     if (plan && ['starter', 'business', 'enterprise'].includes(plan)) tenant.plan = plan;
+    if (industry) {
+      const { normalizeIndustry, modulesFor } = require('../config/industry');
+      const nextIndustry = normalizeIndustry(industry);
+      if (nextIndustry !== tenant.industry) {
+        tenant.industry = nextIndustry;
+        tenant.modules = modulesFor(nextIndustry);
+      }
+    }
     if (STORAGE_OPTIONS_GB.includes(Number(storageGb))) tenant.storageGb = Number(storageGb);
     if (notes != null) tenant.notes = notes;
     if (req.body.trialEndsAt) tenant.trialEndsAt = new Date(req.body.trialEndsAt);

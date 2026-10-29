@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useCalendar } from "@/context/CalendarContext";
 import { CalendarType } from "@/lib/nepaliDate";
 import { Save, Shield } from "lucide-react";
+import { InstallAppHint } from "@/components/pwa/PwaProvider";
 import toast from "react-hot-toast";
 
 interface Settings {
@@ -20,6 +21,11 @@ interface Settings {
   pan: string;
   vatNumber: string;
   vatRate: number;
+  serviceChargePercent?: number;
+  loyaltyStampsNeeded?: number;
+  fiscalYear?: string;
+  cbmsEnabled?: boolean;
+  cbmsUrl?: string;
   vatInclusive: boolean;
   invoicePrefix: string;
   termsAndConditions: string;
@@ -54,7 +60,8 @@ function roleLabel(role: string) {
 }
 
 export default function SettingsPage() {
-  const { user, hasPermission, refreshUser } = useAuth();
+  const { user, hasPermission, hasModule, refreshUser } = useAuth();
+  const recipesOn = hasModule("recipes");
   const { setCalendarType, setCompanyName } = useCalendar();
   const canManageUsers = hasPermission("users:manage", "settings:manage");
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -171,6 +178,14 @@ export default function SettingsPage() {
         }
       />
 
+      <div className="mb-4">
+        <FormCard>
+          <FormSection title="This phone" description="Install the ERP as a home-screen icon. Same website, no Play Store. Internet is still required.">
+            <InstallAppHint />
+          </FormSection>
+        </FormCard>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <FormCard>
           <FormSection title="Company Profile">
@@ -207,6 +222,19 @@ export default function SettingsPage() {
               <FormField label="VAT Rate (%)">
                 <input type="number" className="input-field" value={settings.vatRate} onChange={(e) => update("vatRate", Number(e.target.value))} />
               </FormField>
+              {recipesOn && (
+                <FormField label="Dine-in service charge (%)">
+                  <input type="number" className="input-field" value={settings.serviceChargePercent ?? 10} onChange={(e) => update("serviceChargePercent", Number(e.target.value))} />
+                </FormField>
+              )}
+              {recipesOn && (
+                <FormField label="Loyalty stamps for a free drink">
+                  <input type="number" className="input-field" value={settings.loyaltyStampsNeeded ?? 10} onChange={(e) => update("loyaltyStampsNeeded", Number(e.target.value))} />
+                </FormField>
+              )}
+              <FormField label="Fiscal year">
+                <input className="input-field" placeholder="2025/26" value={settings.fiscalYear || ""} onChange={(e) => update("fiscalYear", e.target.value)} />
+              </FormField>
               <FormField label="Invoice Prefix">
                 <input className="input-field" value={settings.invoicePrefix} onChange={(e) => update("invoicePrefix", e.target.value)} />
               </FormField>
@@ -237,6 +265,16 @@ export default function SettingsPage() {
                 </div>
               </FormField>
             </div>
+            <div className="mt-3">
+              <FormCheckbox id="cbmsEnabled" label="Queue invoices for IRD/CBMS" checked={Boolean(settings.cbmsEnabled)} onChange={(v) => update("cbmsEnabled", v)} />
+            </div>
+            {settings.cbmsEnabled && (
+              <div className="mt-3">
+                <FormField label="CBMS endpoint URL">
+                  <input className="input-field" value={settings.cbmsUrl || ""} onChange={(e) => update("cbmsUrl", e.target.value)} placeholder="https://…" />
+                </FormField>
+              </div>
+            )}
             <div className="mt-3 space-y-3">
               <FormField label="Terms & Conditions">
                 <textarea className="input-field min-h-[72px] resize-y" value={settings.termsAndConditions || ""} onChange={(e) => update("termsAndConditions", e.target.value)} />

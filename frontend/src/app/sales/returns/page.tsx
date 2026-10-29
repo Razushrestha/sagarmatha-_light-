@@ -33,6 +33,7 @@ interface ReturnLine {
   maxQty: number;
   unitPrice: number;
   subtotal: number;
+  tinted?: boolean;
 }
 
 function productIdOf(product?: string | { _id: string }) {
@@ -108,13 +109,15 @@ export default function SalesReturnsPage() {
       quantity?: number;
       returnedQuantity?: number;
       unitPrice?: number;
+      tinted?: boolean;
     }>;
   }): ReturnLine[] => {
     const warehouse = resolveWarehouseId(sale.warehouse);
     if (warehouse) setWarehouseId((prev) => prev || warehouse);
     return (sale.items || [])
       .map((item) => {
-        const maxQty = remainingQty(item);
+        const tinted = Boolean(item.tinted);
+        const maxQty = tinted ? 0 : remainingQty(item);
         return {
           saleId: sale._id,
           invoiceNumber: sale.invoiceNumber,
@@ -124,9 +127,10 @@ export default function SalesReturnsPage() {
           maxQty,
           unitPrice: item.unitPrice || 0,
           subtotal: 0,
+          tinted,
         };
       })
-      .filter((item) => item.maxQty > 0);
+      .filter((item) => item.maxQty > 0 || item.tinted);
   };
 
   const toggleInvoice = async (saleId: string) => {
@@ -340,17 +344,21 @@ export default function SalesReturnsPage() {
                   {returnItems.map((item, idx) => (
                     <tr key={`${item.saleId}-${item.product}-${idx}`} className="border-t">
                       <td className="px-2 py-1 font-medium text-brand-700 whitespace-nowrap">{item.invoiceNumber}</td>
-                      <td className="px-2 py-1">{item.productName}</td>
-                      <td className="px-2 py-1 text-center text-brand-500">{item.maxQty}</td>
+                      <td className="px-2 py-1">
+                        {item.productName}
+                        {item.tinted && <span className="block text-[11px] text-amber-700">Tinted — cannot be returned</span>}
+                      </td>
+                      <td className="px-2 py-1 text-center text-brand-500">{item.tinted ? "—" : item.maxQty}</td>
                       <td className="px-2 py-1">
                         <input
                           type="number"
                           min={0}
                           max={item.maxQty}
                           step="0.01"
+                          disabled={item.tinted}
                           value={item.quantity || ""}
                           onChange={(e) => updateReturnQty(idx, Number(e.target.value))}
-                          className="w-20 input-field py-1"
+                          className="w-20 input-field py-1 disabled:bg-brand-50"
                         />
                       </td>
                       <td className="px-2 py-1">{formatCurrency(item.unitPrice)}</td>

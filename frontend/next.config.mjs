@@ -9,6 +9,17 @@ const nextConfig = {
     config.cache = false;
     return config;
   },
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     const backendPort = process.env.BACKEND_PORT || 5000;
     const backend = process.env.BACKEND_URL || `http://127.0.0.1:${backendPort}`;

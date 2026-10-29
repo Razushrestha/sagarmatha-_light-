@@ -7,6 +7,8 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 import { FormField } from "@/components/ui/FormField";
 import { FormBackLink, FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { electricianAPI } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { DEFAULT_PARTNER_LABEL } from "@/lib/industry";
 import { formatCurrency, formatDate, cn } from "@/lib/utils";
 import {
   Banknote,
@@ -106,6 +108,9 @@ function StatCard({
 
 export default function ElectricianCommissionPage() {
   const { id } = useParams<{ id: string }>();
+  const { user, hasModule } = useAuth();
+  const label = user?.partnerLabel || DEFAULT_PARTNER_LABEL;
+  const paintersOn = hasModule("tinting");
   const [electrician, setElectrician] = useState<Electrician | null>(null);
   const [summary, setSummary] = useState<CommissionSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -164,7 +169,7 @@ export default function ElectricianCommissionPage() {
   if (loading) {
     return (
       <DashboardLayout>
-        <FormBackLink href="/electricians" label="Electricians" />
+        <FormBackLink href="/electricians" label={label.plural} />
         <div className="h-36 bg-brand-50 rounded-2xl animate-pulse mb-6" />
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[...Array(8)].map((_, i) => (
@@ -178,8 +183,8 @@ export default function ElectricianCommissionPage() {
   if (!electrician || !summary) {
     return (
       <DashboardLayout>
-        <FormBackLink href="/electricians" label="Electricians" />
-        <p className="text-brand-500">Electrician not found.</p>
+        <FormBackLink href="/electricians" label={label.plural} />
+        <p className="text-brand-500">{label.singular} not found.</p>
       </DashboardLayout>
     );
   }
@@ -188,17 +193,19 @@ export default function ElectricianCommissionPage() {
 
   return (
     <DashboardLayout>
-      <FormBackLink href="/electricians" label="Electricians" />
+      <FormBackLink href="/electricians" label={label.plural} />
 
       <section className="relative overflow-hidden rounded-2xl bg-brand-900 text-white p-6 sm:p-8 mb-6">
         <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-white/5" />
         <div className="absolute -right-6 bottom-0 w-32 h-32 rounded-full bg-white/5" />
         <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
           <div>
-            <p className="text-xs uppercase tracking-[0.18em] text-brand-300 mb-2">Electrician ledger</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-brand-300 mb-2">{label.singular} ledger</p>
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{electrician.name}</h1>
             <p className="text-sm text-brand-200 mt-2 max-w-xl">
-              Commission is calculated item by item. Wire and cable lines stay at 0%.
+              {paintersOn
+                ? `Tag this ${label.singular.toLowerCase()} on POS. Commission uses the same item rates as electrician jobs.`
+                : "Commission is calculated item by item. Wire and cable lines stay at 0%."}
             </p>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-brand-100 mt-4">
               <span className="inline-flex items-center gap-1.5">
@@ -246,7 +253,7 @@ export default function ElectricianCommissionPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mb-6">
         <div className="xl:col-span-2 card p-5">
-          <h2 className="text-sm font-semibold text-brand-900 mb-1">Pay electrician</h2>
+          <h2 className="text-sm font-semibold text-brand-900 mb-1">Pay {label.singular.toLowerCase()}</h2>
           <p className="text-xs text-brand-400 mb-4">Recorded payments reduce the remaining amount.</p>
           <form onSubmit={handlePay} className="space-y-4">
             <FormGrid cols={2}>
@@ -333,7 +340,7 @@ export default function ElectricianCommissionPage() {
           <div className="py-14 text-center text-brand-400">
             <Receipt className="w-10 h-10 mx-auto mb-2 opacity-40" />
             <p className="text-sm">No bills assigned yet.</p>
-            <p className="text-xs mt-1">Choose this electrician in the cart when making a sale.</p>
+            <p className="text-xs mt-1">Choose this {label.singular.toLowerCase()} in the cart when making a sale.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

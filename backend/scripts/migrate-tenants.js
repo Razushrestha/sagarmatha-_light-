@@ -4,6 +4,7 @@ const connectDB = require('../src/config/db');
 const Tenant = require('../src/models/Tenant');
 const User = require('../src/models/User');
 const company = require('../src/config/company');
+const { runWithTenant } = require('../src/utils/tenantContext');
 
 const SHOP_COLLECTIONS = [
   'categories',
@@ -29,6 +30,7 @@ const SHOP_COLLECTIONS = [
   'supplierpayments',
   'customerpayments',
   'roles',
+  'paintshades',
 ];
 
 const OLD_UNIQUE = [
@@ -122,6 +124,31 @@ const migrate = async () => {
     const match = names.find((n) => n.toLowerCase() === collName);
     if (!match) continue;
     await dropIfExists(db.collection(match), indexName);
+  }
+
+  const { modulesFor } = require('../src/config/industry');
+  const tenants = await Tenant.find();
+  for (const shop of tenants) {
+    if (!shop.industry) shop.industry = shop.slug === 'sagarmatha' ? 'hardware' : (shop.industry || 'hardware');
+    shop.industry = shop.industry || 'hardware';
+    shop.modules = modulesFor(shop.industry, shop.modules);
+    await shop.save();
+  }
+  console.log(`Set industry/modules on ${tenants.length} shop(s)`);
+
+  const { Unit } = require('../src/models/Unit');
+  const extraUnits = [
+    { name: 'Gram', shortName: 'g' },
+    { name: 'Litre', shortName: 'L' },
+    { name: 'Millilitre', shortName: 'ml' },
+  ];
+  for (const shop of tenants) {
+    await runWithTenant(shop._id, async () => {
+      for (const unit of extraUnits) {
+        const exists = await Unit.findOne({ shortName: unit.shortName });
+        if (!exists) await Unit.create(unit);
+      }
+    });
   }
 
   console.log('\nTenant migration complete. Shop slug: sagarmatha');

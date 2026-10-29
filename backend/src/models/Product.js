@@ -32,6 +32,7 @@ const productSchema = new mongoose.Schema({
   supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier' },
   trackSerial: { type: Boolean, default: false },
   warrantyMonths: { type: Number, default: 0 },
+  attrs: { type: mongoose.Schema.Types.Mixed, default: {} },
   isActive: { type: Boolean, default: true },
   priceHistory: [{
     price: Number,

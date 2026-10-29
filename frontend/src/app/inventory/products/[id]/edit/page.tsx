@@ -25,6 +25,7 @@ export default function EditProductPage() {
   const [warehouses, setWarehouses] = useState<Option[]>([]);
   const [images, setImages] = useState<string[]>([]);
   const [form, setForm] = useState<ProductFormState>(emptyProductForm);
+  const [existingAttrs, setExistingAttrs] = useState<Record<string, unknown>>({});
 
   useEffect(() => {
     Promise.all([
@@ -58,7 +59,10 @@ export default function EditProductPage() {
         vatInclusive: p.vatInclusive ?? true,
         vatRate: String(p.vatRate ?? 13),
         commissionPercent: String(p.commissionPercent ?? 5),
+        paintRole: p.attrs?.tinted ? "tinted" : (p.attrs?.role || "stock"),
+        packLitres: p.attrs?.packLitres ? String(p.attrs.packLitres) : "",
       });
+      setExistingAttrs(p.attrs || {});
       setImages(p.images || []);
     }).catch(() => toast.error("Product not found"))
       .finally(() => setFetching(false));
@@ -72,7 +76,7 @@ export default function EditProductPage() {
     if (loading) return;
     setLoading(true);
     try {
-      await productAPI.update(id, productPayload(form, images));
+      await productAPI.update(id, productPayload(form, images, existingAttrs));
       toast.success("Product updated!");
       router.push("/inventory/products");
     } catch (err: unknown) {

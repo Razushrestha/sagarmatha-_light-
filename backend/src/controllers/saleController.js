@@ -10,14 +10,120 @@ const { applyCommissionToSaleBody } = require('../utils/electricianCommission');
 const { allocateReturnLines, round2 } = require('../utils/saleReturn');
 const { tenantKey, cacheGet, cacheSet, invalidateShopCache } = require('../utils/cache');
 const { scoped, scopedMatch, parsePaging, mustBelongToShop } = require('../utils/tenantQuery');
+const { hasModule } = require('../config/industry');
+const Product = require('../models/Product');
+const { isTintedSaleItem } = require('../config/paintPacks');
+const { stampRecipeItems } = require('../services/recipeService');
+const { cafeBillTotals } = require('../utils/cafeBill');
+const Shift = require('../models/Shift');
+const { parseFolioId } = require('../utils/folio');
+const DiningTable = require('../models/DiningTable');
+const PriceRule = require('../models/PriceRule');
+const { matchingHappyHour, applyHappyHourToItems } = require('../utils/happyHour');
+const { registerSaleWithIrd } = require('../services/irdService');
+const { nextInvoiceNumber } = require('../utils/invoiceNumber');
 
 function saleWasPosted(sale) {
   return ['invoice', 'estimate'].includes(sale.type) && sale.status === 'completed' && !sale.isHeld;
 }
 
+async function stampTintedItems(items) {
+  if (!Array.isArray(items) || !items.length) return items;
+  const ids = items.map((item) => item.product).filter(Boolean);
+  const products = await Product.find({ _id: { $in: ids } }).select('attrs').lean();
+  const byId = new Map(products.map((row) => [String(row._id), row]));
+  return items.map((item) => {
+    const product = byId.get(String(item.product));
+    const mark = Boolean(product?.attrs?.tinted);
+    return {
+      ...item,
+      tinted: mark,
+      shadeCode: mark ? (product.attrs.shadeCode || item.shadeCode) : item.shadeCode,
+    };
+  });
+}
+
 function saleId(value) {
   if (!value) return null;
   return String(value._id || value);
+}
+
+async function applyCafeTotals(req, body) {
+  if (!hasModule(req.tenant, 'recipes')) return;
+  const settings = await Settings.findOne().select('serviceChargePercent vatRate').lean();
+  const scPercent = Number(settings?.serviceChargePercent);
+  const vatRate = Number(settings?.vatRate);
+  const serviceType = body.serviceType === 'takeaway' ? 'takeaway' : 'dine_in';
+  body.serviceType = serviceType;
+  const bill = cafeBillTotals({
+    food: Number(body.subtotal) || 0,
+    serviceChargePercent: Number.isFinite(scPercent) ? scPercent : 10,
+    vatRate: Number.isFinite(vatRate) ? vatRate : 13,
+    includeVat: body.isVatBill !== false,
+    serviceType,
+  });
+  body.serviceChargePercent = serviceType === 'takeaway' ? 0 : (Number.isFinite(scPercent) ? scPercent : 10);
+  body.serviceChargeAmount = bill.serviceCharge;
+  body.vatAmount = bill.vatAmount;
+  body.total = bill.total;
+}
+
+async function applyHappyHourIfCafe(req, body) {
+  if (!hasModule(req.tenant, 'recipes') || !Array.isArray(body.items)) return;
+  const rules = await PriceRule.find({ isActive: true }).lean();
+  const rule = matchingHappyHour(rules);
+  if (!rule) return;
+  body.items = applyHappyHourToItems(body.items, rule);
+  body.happyHourPercent = rule.percentOff;
+}
+
+async function syncDiningTable(tableId, sale) {
+  if (!tableId) return;
+  const table = await DiningTable.findById(tableId);
+  if (!table) return;
+  if (sale.isHeld) {
+    table.status = 'occupied';
+    table.sale = sale._id;
+  } else {
+    const otherHeld = await Sale.findOne({ table: tableId, isHeld: true, _id: { $ne: sale._id } });
+    if (!otherHeld) {
+      table.status = 'free';
+      table.sale = null;
+    }
+  }
+  await table.save();
+}
+
+async function afterCompletedSale(sale) {
+  if (sale.customer && (sale.serviceType || (sale.items || []).some((item) => item.recipeDeducted?.length))) {
+    const settings = await Settings.findOne().select('loyaltyStampsNeeded').lean();
+    const need = Number(settings?.loyaltyStampsNeeded) || 10;
+    const customer = await Customer.findById(sale.customer);
+    if (customer) {
+      const stamps = (sale.items || []).reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+      customer.loyaltyStamps = (customer.loyaltyStamps || 0) + stamps;
+      sale.loyaltyStampsAwarded = stamps;
+      while (customer.loyaltyStamps >= need) {
+        customer.loyaltyStamps -= need;
+        customer.loyaltyRewards = (customer.loyaltyRewards || 0) + 1;
+      }
+      await customer.save();
+    }
+  }
+  await registerSaleWithIrd(sale);
+  await sale.save();
+  await syncDiningTable(sale.table, sale);
+}
+
+async function requireOpenShift(req, body, { held }) {
+  if (held || !hasModule(req.tenant, 'shifts')) return;
+  const shift = await Shift.findOne(scoped(req, { status: 'open' }));
+  if (!shift) {
+    const err = new Error('Open a cash shift before selling.');
+    err.statusCode = 400;
+    throw err;
+  }
+  body.shift = shift._id;
 }
 
 async function saleReturnCount(saleIdValue) {
@@ -26,19 +132,7 @@ async function saleReturnCount(saleIdValue) {
   });
 }
 
-const generateNumber = async (prefix) => {
-  const settings = await Settings.findOne();
-  const startNum = settings?.invoiceStartNumber || 1;
-  const latest = await Sale.findOne({ invoiceNumber: new RegExp(`^${prefix}-`) })
-    .sort({ invoiceNumber: -1 })
-    .select('invoiceNumber');
-  let next = startNum;
-  if (latest?.invoiceNumber) {
-    const parsed = parseInt(String(latest.invoiceNumber).split('-').pop() || '', 10);
-    if (!Number.isNaN(parsed)) next = Math.max(startNum, parsed + 1);
-  }
-  return `${prefix}-${String(next).padStart(6, '0')}`;
-};
+const generateNumber = (prefix) => nextInvoiceNumber(prefix);
 
 exports.getSales = async (req, res) => {
   try {
@@ -106,6 +200,12 @@ exports.getSale = async (req, res) => {
 exports.createSale = async (req, res) => {
   try {
     const type = req.body.type || 'invoice';
+    if (type === 'quotation' && !hasModule(req.tenant, 'quotations')) {
+      return res.status(404).json({ success: false, message: 'Not available for this shop.' });
+    }
+    if (!hasModule(req.tenant, 'partners')) {
+      delete req.body.electrician;
+    }
     const prefix = type === 'quotation' ? 'QT' : type === 'estimate' ? 'EST' : 'INV';
 
     const isHeld = req.body.isHeld === true;
@@ -113,7 +213,7 @@ exports.createSale = async (req, res) => {
     let { amountPaid, amountDue } = normalizeSalePaymentFields(req.body.total, payments, {
       amountPaid: req.body.amountPaid,
       amountDue: req.body.amountDue,
-    });
+    }); // recalculated after cafe totals when recipes are on
 
     // Guard: debtor sales must keep unpaid balance when credit payment line exists.
     if (hasCreditPayment(payments) && amountDue <= 0) {
@@ -131,11 +231,36 @@ exports.createSale = async (req, res) => {
 
     const warehouse = req.body.warehouse || await getDefaultWarehouseId();
 
+    if (Array.isArray(req.body.items) && req.body.items.length) {
+      req.body.items = await stampTintedItems(req.body.items);
+      if (hasModule(req.tenant, 'recipes')) {
+        await applyHappyHourIfCafe(req, req.body);
+        req.body.items = await stampRecipeItems(req.body.items);
+        await applyCafeTotals(req, req.body);
+        ({ amountPaid, amountDue } = normalizeSalePaymentFields(req.body.total, payments, {
+          amountPaid: req.body.amountPaid,
+          amountDue: req.body.amountDue,
+        }));
+        if (hasCreditPayment(payments) && amountDue <= 0) {
+          const safeTotal = Number(req.body.total) || 0;
+          const cashPaid = payments
+            .filter((p) => p.method !== 'credit')
+            .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+          amountPaid = Math.min(safeTotal, cashPaid);
+          amountDue = Math.max(0, safeTotal - amountPaid);
+        }
+      }
+    }
+
+    await requireOpenShift(req, req.body, { held: isHeld || type === 'quotation' });
+
     const payload = {
       ...req.body,
       type,
       payments,
       warehouse,
+      folioId: parseFolioId(req.body.folioId),
+      table: hasModule(req.tenant, 'tables') ? (req.body.table || undefined) : undefined,
       amountPaid: isHeld ? 0 : amountPaid,
       amountDue: isHeld ? req.body.total : amountDue,
       status: isHeld ? 'draft' : (req.body.status || 'completed'),
@@ -159,8 +284,11 @@ exports.createSale = async (req, res) => {
     }
 
     const isCompletedSale = ['invoice', 'estimate'].includes(sale.type) && sale.status === 'completed' && !sale.isHeld;
+    if (sale.table) await syncDiningTable(sale.table, sale);
+
     if (isCompletedSale) {
       await processSale(sale, req.user._id, req);
+      await afterCompletedSale(sale);
       if (sale.customer) {
         const customerId = sale.customer._id || sale.customer;
         await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customerId);
@@ -184,6 +312,77 @@ exports.getHeldSales = async (req, res) => {
     res.json({ success: true, data: held });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.splitSale = async (req, res) => {
+  try {
+    const sale = await Sale.findOne(scoped(req, { _id: req.params.id, isHeld: true }));
+    if (!sale) return res.status(404).json({ success: false, message: 'Open table bill not found.' });
+    const moves = Array.isArray(req.body.items) ? req.body.items : [];
+    if (!moves.length) return res.status(400).json({ success: false, message: 'Pick items to split off.' });
+
+    const newItems = [];
+    for (const move of moves) {
+      const idx = Number(move.index);
+      const qty = Number(move.quantity);
+      const item = sale.items[idx];
+      if (!item || !(qty > 0) || qty > item.quantity) {
+        return res.status(400).json({ success: false, message: 'Split quantities do not match the bill.' });
+      }
+      const share = qty / item.quantity;
+      const cloned = item.toObject ? item.toObject() : { ...item };
+      cloned.quantity = qty;
+      cloned.subtotal = round2((Number(item.subtotal) || 0) * share);
+      cloned.vatAmount = round2((Number(item.vatAmount) || 0) * share);
+      cloned.commission = round2((Number(item.commission) || 0) * share);
+      newItems.push(cloned);
+      item.quantity = round2(item.quantity - qty);
+      item.subtotal = round2((Number(item.subtotal) || 0) * (1 - share));
+      item.vatAmount = round2((Number(item.vatAmount) || 0) * (1 - share));
+      item.commission = round2((Number(item.commission) || 0) * (1 - share));
+    }
+    sale.items = sale.items.filter((item) => Number(item.quantity) > 0);
+    const remainingFood = sale.items.reduce((s, item) => s + (Number(item.subtotal) || 0), 0);
+    sale.subtotal = remainingFood;
+    await applyCafeTotals(req, sale);
+    sale.total = sale.total || remainingFood;
+    await sale.save();
+
+    const splitBody = {
+      items: newItems,
+      subtotal: newItems.reduce((s, item) => s + (Number(item.subtotal) || 0), 0),
+      serviceType: sale.serviceType,
+      table: sale.table,
+      isVatBill: sale.isVatBill,
+      warehouse: sale.warehouse,
+    };
+    await applyCafeTotals(req, splitBody);
+    const split = await Sale.create({
+      type: 'invoice',
+      status: 'draft',
+      isHeld: true,
+      heldAt: new Date(),
+      invoiceNumber: await generateNumber('INV'),
+      items: newItems,
+      subtotal: splitBody.subtotal,
+      vatAmount: splitBody.vatAmount,
+      serviceChargeAmount: splitBody.serviceChargeAmount,
+      serviceChargePercent: splitBody.serviceChargePercent,
+      serviceType: sale.serviceType,
+      table: sale.table,
+      splitFrom: sale._id,
+      total: splitBody.total,
+      amountPaid: 0,
+      amountDue: splitBody.total,
+      isVatBill: sale.isVatBill,
+      warehouse: sale.warehouse,
+      createdBy: req.user._id,
+    });
+    await syncDiningTable(sale.table, sale);
+    res.status(201).json({ success: true, data: { original: sale, split } });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -235,7 +434,7 @@ exports.updateSale = async (req, res) => {
     sale.electrician = payload.electrician !== undefined ? payload.electrician : sale.electrician;
     sale.commissionRate = payload.commissionRate ?? sale.commissionRate;
     sale.commissionTotal = payload.commissionTotal ?? sale.commissionTotal;
-    sale.items = payload.items || sale.items;
+    sale.items = payload.items ? await stampTintedItems(payload.items) : sale.items;
     sale.subtotal = payload.subtotal ?? sale.subtotal;
     sale.discount = payload.discount ?? sale.discount;
     sale.discountType = payload.discountType || sale.discountType;
@@ -307,10 +506,23 @@ exports.completeHeldSale = async (req, res) => {
     if (!sale || !sale.isHeld) return res.status(404).json({ success: false, message: 'Held sale not found.' });
 
     await applyCommissionToSaleBody(req.body);
-    Object.assign(sale, req.body, { isHeld: false, heldAt: undefined, status: 'completed' });
+    if (Array.isArray(req.body.items)) req.body.items = await stampTintedItems(req.body.items);
+    if (hasModule(req.tenant, 'recipes') && Array.isArray(req.body.items)) {
+      await applyHappyHourIfCafe(req, req.body);
+      req.body.items = await stampRecipeItems(req.body.items);
+      await applyCafeTotals(req, req.body);
+    }
+    await requireOpenShift(req, req.body, { held: false });
+    Object.assign(sale, req.body, {
+      isHeld: false,
+      heldAt: undefined,
+      status: 'completed',
+      folioId: parseFolioId(req.body.folioId !== undefined ? req.body.folioId : sale.folioId),
+    });
     await sale.save();
 
     await processSale(sale, req.user._id, req);
+    await afterCompletedSale(sale);
     if (sale.customer) {
       await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, sale.customer);
     }
@@ -328,6 +540,9 @@ exports.convertToSale = async (req, res) => {
     if (!source) return res.status(404).json({ success: false, message: 'Document not found.' });
     if (!['quotation', 'estimate'].includes(source.type)) {
       return res.status(400).json({ success: false, message: 'Only quotations or estimates can be converted.' });
+    }
+    if (source.type === 'quotation' && !hasModule(req.tenant, 'quotations')) {
+      return res.status(404).json({ success: false, message: 'Not available for this shop.' });
     }
 
     const invoiceNumber = await generateNumber('INV');
@@ -374,12 +589,14 @@ exports.convertToSale = async (req, res) => {
       isVatBill: req.body.isVatBill ?? source.isVatBill ?? true,
       notes: source.notes,
       warehouse,
+      folioId: parseFolioId(req.body.folioId !== undefined ? req.body.folioId : source.folioId),
       createdBy: req.user._id,
     });
 
     source.status = 'completed';
     await source.save();
     await processSale(sale, req.user._id, req);
+    await afterCompletedSale(sale);
     if (sale.customer) {
       await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, sale.customer);
     }
@@ -390,6 +607,16 @@ exports.convertToSale = async (req, res) => {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
+
+function rejectTintedReturn(sale, allocated) {
+  for (const alloc of allocated.allocations || []) {
+    const item = sale.items[alloc.saleItemIndex];
+    if (!isTintedSaleItem(item)) continue;
+    const err = new Error(`Tinted paint cannot be returned (${item.productName || 'tin'}).`);
+    err.statusCode = 400;
+    throw err;
+  }
+}
 
 function assertReturnableSale(sale) {
   if (!sale) {
@@ -483,6 +710,7 @@ exports.createReturn = async (req, res) => {
     assertReturnableSale(originalSale);
     const requested = Array.isArray(req.body.items) ? req.body.items : [];
     const allocated = allocateReturnLines(originalSale.items, requested);
+    rejectTintedReturn(originalSale, allocated);
     const refundMethod = ['cash', 'bank', 'credit_note'].includes(req.body.refundMethod)
       ? req.body.refundMethod
       : 'cash';
@@ -515,6 +743,7 @@ exports.createReturnsBatch = async (req, res) => {
       const sale = await Sale.findOne(scoped(req, { _id: saleId }));
       assertReturnableSale(sale);
       const allocated = allocateReturnLines(sale.items, entry.items || []);
+      rejectTintedReturn(sale, allocated);
       groups.push({ sale, allocated });
     }
 

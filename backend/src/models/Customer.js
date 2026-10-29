@@ -20,6 +20,8 @@ const customerSchema = new mongoose.Schema({
   outstanding: { type: Number, default: 0 },
   creditBalance: { type: Number, default: 0 },
   customerType: { type: String, enum: ['retail', 'wholesale', 'dealer', 'project'], default: 'retail' },
+  loyaltyStamps: { type: Number, default: 0, min: 0 },
+  loyaltyRewards: { type: Number, default: 0, min: 0 },
   notes: { type: String },
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });
