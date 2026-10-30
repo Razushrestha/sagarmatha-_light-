@@ -17,5 +17,6 @@ const channelReservationSchema = new mongoose.Schema({
 
 applyTenantPlugin(channelReservationSchema);
 channelReservationSchema.index({ tenantId: 1, status: 1, checkIn: 1 });
+channelReservationSchema.index({ tenantId: 1, status: 1, checkIn: 1, checkOut: 1 });
 
 module.exports = mongoose.model('ChannelReservation', channelReservationSchema);

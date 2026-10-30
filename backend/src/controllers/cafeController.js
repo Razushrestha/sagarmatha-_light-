@@ -102,7 +102,7 @@ exports.bookWaste = async (req, res) => {
       }, req);
     });
 
-    await invalidateShopCache(['products', 'dashboard']);
+    await invalidateShopCache(['products', 'dashboard', 'reports']);
     res.status(201).json({ success: true, data: { reference: ref, reason, lines, quantity } });
   } catch (error) {
     res.status(error.statusCode || 400).json({ success: false, message: error.message });

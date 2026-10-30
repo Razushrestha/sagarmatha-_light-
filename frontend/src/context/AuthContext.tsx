@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useRef, useMemo, useCallback, ReactNode } from "react";
 import { authAPI } from "@/lib/api";
 import { hasModule as moduleEnabled, type PartnerLabel, type ShopModules } from "@/lib/industry";
 
@@ -67,40 +67,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
-  const acceptSession = (data: User) => {
+  const acceptSession = useCallback((data: User) => {
     requestId.current += 1;
     setUser(data);
     setLoading(false);
     return data.landingPage || "/dashboard";
-  };
+  }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string) => {
     const res = await authAPI.login({ email, password });
     return acceptSession(res.data.data);
-  };
+  }, [acceptSession]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     requestId.current += 1;
     await authAPI.logout();
     setUser(null);
-  };
+  }, []);
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     const res = await authAPI.getMe();
     setUser(res.data.data);
-  };
+  }, []);
 
-  const hasPermission = (...perms: string[]) => {
+  const hasPermission = useCallback((...perms: string[]) => {
     if (!user) return false;
     if (user.role === "platform_admin") return user.impersonating === true;
     if (user.role === "super_admin") return true;
     return perms.some((p) => user.permissions.includes(p));
-  };
+  }, [user]);
 
-  const hasModule = (name: keyof ShopModules) => moduleEnabled(user?.modules, name, user?.industry);
+  const hasModule = useCallback(
+    (name: keyof ShopModules) => moduleEnabled(user?.modules, name, user?.industry),
+    [user]
+  );
+
+  const value = useMemo(
+    () => ({ user, loading, login, acceptSession, logout, hasPermission, hasModule, refreshUser }),
+    [user, loading, login, acceptSession, logout, hasPermission, hasModule, refreshUser]
+  );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, acceptSession, logout, hasPermission, hasModule, refreshUser }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

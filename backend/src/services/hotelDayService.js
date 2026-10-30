@@ -2,16 +2,36 @@ const Room = require('../models/Room');
 const Stay = require('../models/Stay');
 const { scoped } = require('../utils/tenantQuery');
 const { staySpan, addDaysYmd, startOfKathmandu } = require('../utils/hotelDates');
+const { tenantKey, cacheGet, cacheSet } = require('../utils/cache');
 
 async function hotelDayReport(req, date) {
+  const cacheKey = tenantKey(['hotel', 'dayreport', date]);
+  const cached = await cacheGet(cacheKey);
+  if (cached) return cached;
+
   const next = addDaysYmd(date, 1);
   const fromDate = startOfKathmandu(date);
   const untilDate = startOfKathmandu(next);
-  const rooms = await Room.find(scoped(req, { isActive: true })).lean();
-  const stays = await Stay.find(scoped(req, { status: { $in: ['reserved', 'checked_in', 'checked_out', 'no_show'] } }))
-    .populate('room', 'number')
-    .populate('folio', 'balance charges')
+  const rooms = await Room.find(scoped(req, { isActive: true }))
+    .select('number status')
     .lean();
+
+  // Bound the stay set to anything that could touch this hotel date.
+  const stays = await Stay.find(scoped(req, {
+    status: { $in: ['reserved', 'checked_in', 'checked_out', 'no_show'] },
+    checkIn: { $lt: untilDate },
+    $or: [
+      { checkOut: { $gt: fromDate } },
+      { checkOut: null },
+      { checkOut: { $exists: false } },
+      { status: { $in: ['reserved', 'checked_in'] } },
+    ],
+  }))
+    .select('guestName room folio status checkIn checkOut nights')
+    .populate('room', 'number')
+    .populate('folio', 'balance')
+    .lean();
+
   const occupying = stays.filter((stay) => {
     const span = staySpan(stay);
     return span.start <= date && date < span.end && (stay.status === 'reserved' || stay.status === 'checked_in');
@@ -23,7 +43,7 @@ async function hotelDayReport(req, date) {
     createdAt: { $gte: fromDate, $lt: untilDate },
     status: 'completed',
     isHeld: { $ne: true },
-  })).select('total vatAmount items sku folioId').lean();
+  })).select('total vatAmount items.sku folioId').lean();
   let roomRevenue = 0;
   let roomVat = 0;
   let fbRevenue = 0;
@@ -43,7 +63,7 @@ async function hotelDayReport(req, date) {
     return acc;
   }, {});
   const inHouse = occupying.filter((s) => s.status === 'checked_in');
-  return {
+  const data = {
     date,
     rooms: {
       total: rooms.length,
@@ -70,6 +90,8 @@ async function hotelDayReport(req, date) {
       fbVat: Math.round(fbVat * 100) / 100,
     },
   };
+  await cacheSet(cacheKey, data, 45);
+  return data;
 }
 
 module.exports = { hotelDayReport };

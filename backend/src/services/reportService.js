@@ -2,25 +2,46 @@ const Sale = require('../models/Sale');
 const Product = require('../models/Product');
 const Customer = require('../models/Customer');
 const { scoped, scopedMatch, parsePaging } = require('../utils/tenantQuery');
+const {
+  TZ,
+  parseBusinessDateRange,
+  todayStartKathmandu,
+  endOfKathmanduDay,
+  kathmanduYmd,
+  netSaleAmount,
+  revenueSaleMatch,
+} = require('../utils/businessDates');
+
+function createdAtMatch(startDate, endDate, { defaultToday = false } = {}) {
+  let range = parseBusinessDateRange(startDate, endDate);
+  if (!range && defaultToday) {
+    const today = kathmanduYmd();
+    range = { $gte: todayStartKathmandu(), $lte: endOfKathmanduDay(today) };
+  }
+  return range ? { createdAt: range } : {};
+}
 
 async function buildShopReport(reqLike, { type = 'sales', startDate, endDate, page, limit } = {}) {
-  const dateFilter = {};
-  if (startDate) dateFilter.$gte = new Date(startDate);
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    dateFilter.$lte = end;
-  }
-  const matchDate = Object.keys(dateFilter).length ? { createdAt: dateFilter } : {};
   const req = reqLike;
+  const matchDate = createdAtMatch(startDate, endDate, {
+    defaultToday: type === 'eod',
+  });
+  // For daily sales / products / paint without dates, default to current Nepali month so charts stay current.
+  const periodMatch = Object.keys(matchDate).length
+    ? matchDate
+    : (['sales', 'products', 'paint-mix', 'margin', 'profit-by-item'].includes(type)
+      ? { createdAt: { $gte: require('../utils/businessDates').monthStartKathmandu() } }
+      : {});
 
   if (type === 'sales') {
     return Sale.aggregate([
-      scopedMatch(req, { type: 'invoice', status: 'completed', ...matchDate }),
+      scopedMatch(req, revenueSaleMatch(periodMatch)),
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-          total: { $sum: '$total' },
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: TZ },
+          },
+          total: { $sum: netSaleAmount },
           count: { $sum: 1 },
         },
       },
@@ -30,7 +51,7 @@ async function buildShopReport(reqLike, { type = 'sales', startDate, endDate, pa
 
   if (type === 'products') {
     return Sale.aggregate([
-      scopedMatch(req, { type: 'invoice', status: 'completed', ...matchDate }),
+      scopedMatch(req, revenueSaleMatch(periodMatch)),
       { $unwind: '$items' },
       {
         $group: {
@@ -75,7 +96,7 @@ async function buildShopReport(reqLike, { type = 'sales', startDate, endDate, pa
     };
 
     const pipeline = [
-      scopedMatch(req, { type: 'invoice', status: 'completed', isHeld: { $ne: true }, ...matchDate }),
+      scopedMatch(req, revenueSaleMatch(periodMatch)),
       { $unwind: '$items' },
       {
         $lookup: {
@@ -112,7 +133,7 @@ async function buildShopReport(reqLike, { type = 'sales', startDate, endDate, pa
         {
           $group: {
             _id: {
-              day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+              day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: TZ } },
               kind: '$kind',
             },
             revenue: { $sum: '$items.subtotal' },
@@ -169,7 +190,7 @@ async function buildShopReport(reqLike, { type = 'sales', startDate, endDate, pa
 
   if (type === 'margin' || type === 'profit-by-item') {
     return Sale.aggregate([
-      scopedMatch(req, { type: 'invoice', status: { $in: ['completed', 'partial_return'] }, isHeld: { $ne: true }, ...matchDate }),
+      scopedMatch(req, revenueSaleMatch(periodMatch)),
       { $unwind: '$items' },
       {
         $group: {
@@ -198,12 +219,7 @@ async function buildShopReport(reqLike, { type = 'sales', startDate, endDate, pa
   }
 
   if (type === 'eod') {
-    const saleMatch = scoped(req, {
-      type: 'invoice',
-      status: { $in: ['completed', 'partial_return'] },
-      isHeld: { $ne: true },
-      ...matchDate,
-    });
+    const saleMatch = scoped(req, revenueSaleMatch(matchDate));
     const [salesAgg, cashAgg, profitByItem, creditDue, lowStock] = await Promise.all([
       Sale.aggregate([
         { $match: saleMatch },
@@ -211,7 +227,7 @@ async function buildShopReport(reqLike, { type = 'sales', startDate, endDate, pa
           $group: {
             _id: null,
             count: { $sum: 1 },
-            total: { $sum: '$total' },
+            total: { $sum: netSaleAmount },
             vat: { $sum: { $ifNull: ['$vatAmount', 0] } },
             serviceCharge: { $sum: { $ifNull: ['$serviceChargeAmount', 0] } },
             credit: { $sum: { $ifNull: ['$amountDue', 0] } },
@@ -265,6 +281,7 @@ async function buildShopReport(reqLike, { type = 'sales', startDate, endDate, pa
       creditDue,
       creditTotal: creditDue.reduce((s, row) => s + (Number(row.outstanding) || 0), 0),
       lowStock,
+      date: kathmanduYmd(),
     };
   }
 

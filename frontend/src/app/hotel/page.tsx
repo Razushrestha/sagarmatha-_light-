@@ -77,17 +77,31 @@ export default function HotelPage() {
     return !held;
   });
 
-  const load = useCallback(() => {
-    hotelAPI.getRooms().then((r) => setRooms(r.data.data || [])).catch(() => {});
-    hotelAPI.getStays().then((r) => setStays(r.data.data || [])).catch(() => {});
+  const loadMeta = useCallback(() => {
     hotelAPI.getChannel().then((r) => setChannel(r.data.data || [])).catch(() => {});
     hotelAPI.getRatePlans().then((r) => setRatePlans(r.data.data || [])).catch(() => {});
+  }, []);
+
+  const loadDesk = useCallback(() => {
+    hotelAPI.getStays({ status: "reserved,checked_in", limit: "80" })
+      .then((r) => setStays(r.data.data || []))
+      .catch(() => {});
     hotelAPI.getRack({ from, days: "14" })
-      .then((r) => setRack(r.data.data || null))
+      .then((r) => {
+        const data = r.data.data || null;
+        setRack(data);
+        if (data?.rooms?.length) setRooms(data.rooms as Room[]);
+      })
       .catch(() => toast.error("Could not load room rack"));
   }, [from]);
 
-  useEffect(() => { load(); }, [load]);
+  const load = useCallback(() => {
+    loadMeta();
+    loadDesk();
+  }, [loadMeta, loadDesk]);
+
+  useEffect(() => { loadMeta(); }, [loadMeta]);
+  useEffect(() => { loadDesk(); }, [loadDesk]);
 
   const selectedStay = stays.find((stay) => stay._id === selectedStayId) || null;
   useEffect(() => {

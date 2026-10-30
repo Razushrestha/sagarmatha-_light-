@@ -14,5 +14,6 @@ const roomSchema = new mongoose.Schema({
 
 applyTenantPlugin(roomSchema, { uniqueFields: ['number'] });
 roomSchema.index({ tenantId: 1, status: 1, number: 1 });
+roomSchema.index({ tenantId: 1, isActive: 1, number: 1 });
 
 module.exports = mongoose.model('Room', roomSchema);

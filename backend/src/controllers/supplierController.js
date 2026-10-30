@@ -7,6 +7,7 @@ const { processPurchase, reversePurchase, processPurchaseReturn, reversePurchase
 const { postSupplierPaymentJournal, reverseSupplierPaymentJournal } = require('../services/journalService');
 const { createAuditLog } = require('../middleware/audit');
 const { withOptionalTransaction } = require('../utils/mongoTransaction');
+const { invalidateShopCache } = require('../utils/cache');
 
 async function syncSupplierLedgerAmounts() {
   const purchases = await Purchase.find({ type: { $ne: "order" } }).select("total").lean();
@@ -177,6 +178,7 @@ exports.createPurchase = async (req, res) => {
     }
 
     const populated = await Purchase.findById(purchase._id).populate('supplier', 'name');
+    await invalidateShopCache(['dashboard', 'reports', 'products']);
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
@@ -237,6 +239,7 @@ exports.updatePurchase = async (req, res) => {
     }
 
     const populated = await Purchase.findById(purchase._id).populate('supplier', 'name').populate('warehouse', 'name');
+    await invalidateShopCache(['dashboard', 'reports', 'products']);
     res.json({ success: true, data: populated });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -261,6 +264,7 @@ exports.deletePurchase = async (req, res) => {
     }
 
     await Purchase.deleteOne({ _id: purchase._id });
+    await invalidateShopCache(['dashboard', 'reports', 'products']);
     res.json({ success: true, message: 'Purchase deleted.' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -598,6 +602,7 @@ exports.createSupplierPayment = async (req, res) => {
       .populate('supplier', 'name')
       .populate('paidFromAccount', 'name code');
 
+    await invalidateShopCache(['dashboard', 'reports']);
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

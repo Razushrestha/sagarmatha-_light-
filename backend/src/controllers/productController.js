@@ -145,7 +145,7 @@ exports.updateProduct = async (req, res) => {
     const oldProduct = await Product.findById(req.params.id);
     const product = await Product.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found.' });
-    await invalidateShopCache(['products', 'dashboard']);
+    await invalidateShopCache(['products', 'dashboard', 'reports']);
     await createAuditLog(req.user._id, 'update', 'product', product._id, { name: oldProduct.name, price: oldProduct.sellingPrice }, { name: product.name, price: product.sellingPrice }, req);
     res.json({ success: true, data: product });
   } catch (error) {
@@ -157,7 +157,7 @@ exports.deleteProduct = async (req, res) => {
   try {
     const product = await Product.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
     if (!product) return res.status(404).json({ success: false, message: 'Product not found.' });
-    await invalidateShopCache(['products', 'dashboard']);
+    await invalidateShopCache(['products', 'dashboard', 'reports']);
     await createAuditLog(req.user._id, 'delete', 'product', product._id, { name: product.name }, null, req);
     res.json({ success: true, message: 'Product deactivated.' });
   } catch (error) {
@@ -287,7 +287,7 @@ exports.importProducts = async (req, res) => {
 
     const rawRows = await parseSpreadsheetBuffer(req.file.buffer, req.file.originalname);
     const result = await importRows(rawRows);
-    await invalidateShopCache(['products', 'dashboard']);
+    await invalidateShopCache(['products', 'dashboard', 'reports']);
     await createAuditLog(
       req.user._id,
       'update',

@@ -4,6 +4,29 @@ const Tenant = require('../models/Tenant');
 const { DEFAULT_ROLES } = require('../config/permissions');
 const { runWithTenant } = require('../utils/tenantContext');
 const { shopLoginBlocked, impersonateBlocked } = require('../services/planService');
+const { cacheGet, cacheSet } = require('../utils/cache');
+
+const AUTH_CACHE_TTL = 30;
+
+async function loadUserCached(userId) {
+  const key = `erp:auth:user:${userId}`;
+  const cached = await cacheGet(key);
+  if (cached) return cached;
+  const user = await User.findById(userId)
+    .select('-password -loginHistory -twoFactorSecret')
+    .lean();
+  if (user) await cacheSet(key, user, AUTH_CACHE_TTL);
+  return user;
+}
+
+async function loadTenantCached(tenantId) {
+  const key = `erp:auth:tenant:${tenantId}`;
+  const cached = await cacheGet(key);
+  if (cached) return cached;
+  const tenant = await Tenant.findById(tenantId).lean();
+  if (tenant) await cacheSet(key, tenant, AUTH_CACHE_TTL);
+  return tenant;
+}
 
 const protect = async (req, res, next) => {
   try {
@@ -14,9 +37,7 @@ const protect = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id)
-      .select('-password -loginHistory -twoFactorSecret')
-      .lean();
+    const user = await loadUserCached(decoded.id);
 
     if (!user || !user.isActive) {
       return res.status(401).json({ success: false, message: 'User not found or inactive.' });
@@ -42,7 +63,10 @@ const protect = async (req, res, next) => {
         res.cookie('impersonateTenantId', '', { ...cookieOptions(), maxAge: 0 });
         res.cookie('impersonateUntil', '', { ...cookieOptions(), maxAge: 0 });
       } else if (impersonate && until && until > Date.now()) {
-        const tenant = await Tenant.findById(impersonate).lean();
+        const tenant = await loadTenantCached(impersonate);
+        if (!tenant) {
+          return res.status(403).json({ success: false, message: 'Shop not found.' });
+        }
         const blocked = impersonateBlocked(tenant);
         if (blocked.blocked) {
           return res.status(403).json({ success: false, message: blocked.message });
@@ -60,7 +84,10 @@ const protect = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Account is not linked to a shop.' });
     }
 
-    const tenant = await Tenant.findById(user.tenantId).lean();
+    const tenant = await loadTenantCached(user.tenantId);
+    if (!tenant) {
+      return res.status(403).json({ success: false, message: 'Shop not found.' });
+    }
     const blocked = shopLoginBlocked(tenant);
     if (blocked.blocked) {
       return res.status(403).json({ success: false, message: blocked.message });

@@ -29,7 +29,8 @@ function frontendPort() {
 }
 
 function backendPort() {
-  return Number(process.env.PORT || process.env.BACKEND_PORT || 5000);
+  // Prefer BACKEND_PORT so a leftover PORT=5000 cannot override a deliberate 5016.
+  return Number(process.env.BACKEND_PORT || process.env.PORT || 5000);
 }
 
 function mongoPort() {

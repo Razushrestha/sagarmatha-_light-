@@ -26,5 +26,6 @@ const folioSchema = new mongoose.Schema({
 
 applyTenantPlugin(folioSchema);
 folioSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+folioSchema.index({ tenantId: 1, stay: 1 });
 
 module.exports = mongoose.model('Folio', folioSchema);

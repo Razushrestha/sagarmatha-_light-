@@ -20,6 +20,8 @@
     "test:posting": "node scripts/posting-check.js",
     "test:later-phases": "node scripts/later-phases-check.js",
     "test:ledger": "node scripts/ledger-check.js",
+    "test:dashboard": "node scripts/dashboard-reports-smoke.js",
+    "test:dashboard-api": "node scripts/dashboard-reports-smoke.js --api",
     "sample-catalogs": "node scripts/sample-catalogs.js",
     "eod-report": "node scripts/eod-report.js"
   },

@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
+import DateInput from "@/components/ui/DateInput";
 import { accountingAPI } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { todayISO } from "@/lib/nepaliDate";
+import { RefreshCw } from "lucide-react";
 
 const DailySalesChart = dynamic(() => import("@/components/reports/DailySalesChart"), {
   ssr: false,
@@ -53,10 +56,13 @@ export default function ReportsPage() {
   const { hasModule } = useAuth();
   const tintingOn = hasModule("tinting");
   const [reportType, setReportType] = useState("sales");
+  const [startDate, setStartDate] = useState(() => `${todayISO().slice(0, 7)}-01`);
+  const [endDate, setEndDate] = useState(() => todayISO());
   const [data, setData] = useState<Row[]>([]);
   const [paintMix, setPaintMix] = useState<PaintMixReport | null>(null);
   const [eod, setEod] = useState<EodReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +71,13 @@ export default function ReportsPage() {
     setData([]);
     setPaintMix(null);
     setEod(null);
+
+    const needsDates = !["lowstock", "inventory", "credit"].includes(reportType);
+    const query: Record<string, string> = { type: reportType };
+    if (needsDates) {
+      query.startDate = reportType === "eod" ? endDate : startDate;
+      query.endDate = endDate;
+    }
 
     const applyPayload = (payload: unknown) => {
       if (reportType === "paint-mix") {
@@ -78,7 +91,7 @@ export default function ReportsPage() {
       }
     };
 
-    const loadSync = () => accountingAPI.getReports({ type: reportType })
+    const loadSync = () => accountingAPI.getReports(query)
       .then((res) => {
         if (!cancelled) applyPayload(res.data.data);
       })
@@ -92,7 +105,7 @@ export default function ReportsPage() {
     }
 
     let timer: ReturnType<typeof setTimeout>;
-    accountingAPI.enqueueReport({ type: reportType })
+    accountingAPI.enqueueReport(query)
       .then(async (queued) => {
         const jobId = queued.data.data?.jobId;
         if (!jobId) throw new Error("No job id");
@@ -120,7 +133,7 @@ export default function ReportsPage() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [reportType]);
+  }, [reportType, startDate, endDate, reloadToken]);
 
   const tabs = [
     { id: "sales", label: "Daily Sales" },
@@ -142,9 +155,22 @@ export default function ReportsPage() {
 
   return (
     <DashboardLayout>
-      <PageHeader title="Reports" />
+      <PageHeader
+        title="Reports"
+        action={(
+          <button
+            type="button"
+            className="btn-secondary text-sm inline-flex items-center gap-2"
+            onClick={() => setReloadToken((n) => n + 1)}
+            disabled={loading}
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        )}
+      />
 
-      <div className="flex gap-2 mb-6 flex-wrap">
+      <div className="flex gap-2 mb-4 flex-wrap">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -157,6 +183,21 @@ export default function ReportsPage() {
           </button>
         ))}
       </div>
+
+      {!["lowstock", "inventory", "credit"].includes(reportType) && (
+        <div className="flex flex-wrap gap-3 mb-6 items-end">
+          {reportType !== "eod" && (
+            <div>
+              <label className="label">From</label>
+              <DateInput value={startDate} onChange={setStartDate} />
+            </div>
+          )}
+          <div>
+            <label className="label">{reportType === "eod" ? "Hotel / business day" : "To"}</label>
+            <DateInput value={endDate} onChange={setEndDate} />
+          </div>
+        </div>
+      )}
 
       {reportType === "sales" && !loading && data.length > 0 && (
         <div className="card p-6 mb-6">

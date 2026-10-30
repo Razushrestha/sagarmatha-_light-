@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import StatsCard from "@/components/ui/StatsCard";
 import { saleAPI, accountingAPI } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
-import { DollarSign, ShoppingBag, Users, Package, TrendingUp, BarChart3 } from "lucide-react";
+import { DollarSign, ShoppingBag, Users, Package, TrendingUp, BarChart3, RefreshCw } from "lucide-react";
+import { todayISO } from "@/lib/nepaliDate";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -22,16 +23,30 @@ export default function AnalyticsPage() {
   } | null>(null);
   const [topProducts, setTopProducts] = useState<Array<{ _id: string; quantity: number; revenue: number }>>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback((fresh = true) => {
+    if (fresh) setRefreshing(true);
+    else setLoading(true);
+    const monthStart = `${todayISO().slice(0, 7)}-01`;
     Promise.all([
-      saleAPI.getDashboard(),
-      accountingAPI.getReports({ type: "products" }),
+      saleAPI.getDashboard(fresh ? { refresh: "1" } : undefined),
+      accountingAPI.getReports({ type: "products", startDate: monthStart, endDate: todayISO() }),
     ]).then(([dash, products]) => {
       setDashboard(dash.data.data);
-      setTopProducts(products.data.data.slice(0, 10));
-    }).finally(() => setLoading(false));
+      setTopProducts((products.data.data || []).slice(0, 10));
+    }).finally(() => {
+      setLoading(false);
+      setRefreshing(false);
+    });
   }, []);
+
+  useEffect(() => {
+    load(true);
+    const onFocus = () => load(true);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load]);
 
   const trendData = dashboard?.monthlyTrend.map((item) => ({
     name: monthNames[item._id.month - 1],
@@ -47,7 +62,15 @@ export default function AnalyticsPage() {
 
   return (
     <DashboardLayout>
-      <PageHeader title="Analytics" />
+      <PageHeader
+        title="Analytics"
+        action={(
+          <button type="button" className="btn-secondary text-sm inline-flex items-center gap-2" onClick={() => load(true)} disabled={refreshing}>
+            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        )}
+      />
 
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">

@@ -9,6 +9,7 @@ const {
   ensureSaleReturnStoreCredits,
 } = require('../utils/salePayments');
 const { scoped, scopedMatch, parsePaging, mustBelongToShop } = require('../utils/tenantQuery');
+const { invalidateShopCache } = require('../utils/cache');
 
 function mapDebtor(customer) {
   const doc = customer.toObject ? customer.toObject() : customer;
@@ -260,6 +261,7 @@ exports.receivePayment = async (req, res) => {
     }
 
     await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customer._id);
+    await invalidateShopCache(['dashboard', 'reports']);
 
     await createAuditLog(req.user._id, 'payment', 'customer', customer._id, null, { amount, method }, req);
     res.status(201).json({ success: true, data: payment });
@@ -295,6 +297,7 @@ exports.refundCredit = async (req, res) => {
     });
 
     await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customer._id);
+    await invalidateShopCache(['dashboard', 'reports']);
     await createAuditLog(req.user._id, 'refund', 'customer', customer._id, null, { amount, method }, req);
     res.status(201).json({ success: true, data: refund });
   } catch (error) {

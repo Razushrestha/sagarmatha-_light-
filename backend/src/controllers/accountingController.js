@@ -1,6 +1,7 @@
 const { scoped, scopedMatch, parsePaging } = require('../utils/tenantQuery');
-const { tenantKey, cacheGet, cacheSet } = require('../utils/cache');
+const { tenantKey, cacheGet, cacheSet, invalidateShopCache } = require('../utils/cache');
 const { buildShopReport } = require('../services/reportService');
+const { parseBusinessDateRange, netSaleAmount, revenueSaleMatch } = require('../utils/businessDates');
 const { enqueue, jobResultKey, setJobResult, getJobResult } = require('../utils/jobs');
 const { Account, JournalEntry } = require('../models/Account');
 const Expense = require('../models/Expense');
@@ -41,32 +42,48 @@ exports.getJournalEntries = async (req, res) => {
 
 exports.getFinancialSummary = async (req, res) => {
   try {
-    const cacheKey = tenantKey(['reports', 'summary']);
-    const cached = await cacheGet(cacheKey);
-    if (cached) return res.json({ success: true, data: cached });
+    const {
+      monthStartKathmandu,
+      kathmanduYmd,
+      netSaleAmount,
+      revenueSaleMatch,
+    } = require('../utils/businessDates');
+    const cacheKey = tenantKey(['reports', 'summary', kathmanduYmd()]);
+    const forceRefresh = ['1', 'true', 'yes'].includes(String(req.query.refresh || '').toLowerCase());
+    if (!forceRefresh) {
+      const cached = await cacheGet(cacheKey);
+      if (cached) return res.json({ success: true, data: cached });
+    }
 
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
+    const monthStart = monthStartKathmandu();
 
     const [salesRevenue, purchaseCost, expenses, receivables, payables, inventoryValue, accounts] = await Promise.all([
       Sale.aggregate([
-        scopedMatch(req, { type: 'invoice', status: 'completed', createdAt: { $gte: monthStart } }),
-        { $group: { _id: null, total: { $sum: '$total' } } },
+        scopedMatch(req, revenueSaleMatch({ createdAt: { $gte: monthStart } })),
+        { $group: { _id: null, total: { $sum: netSaleAmount } } },
       ]),
       Purchase.aggregate([
         scopedMatch(req, { status: { $in: ['completed', 'received'] }, createdAt: { $gte: monthStart } }),
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Expense.aggregate([
-        scopedMatch(req, { status: 'approved', date: { $gte: monthStart } }),
+        scopedMatch(req, {
+          $or: [{ status: 'approved' }, { status: { $exists: false } }],
+          date: { $gte: monthStart },
+        }),
         { $group: { _id: null, total: { $sum: '$amount' } } },
       ]),
-      Customer.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
-      Supplier.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
+      Customer.aggregate([
+        scopedMatch(req, { isActive: { $ne: false } }),
+        { $group: { _id: null, total: { $sum: { $ifNull: ['$outstanding', 0] } } } },
+      ]),
+      Supplier.aggregate([
+        scopedMatch(req, { isActive: { $ne: false } }),
+        { $group: { _id: null, total: { $sum: { $ifNull: ['$outstanding', 0] } } } },
+      ]),
       Product.aggregate([
         scopedMatch(req, { isActive: true }),
-        { $group: { _id: null, total: { $sum: { $multiply: ['$currentStock', '$purchasePrice'] } } } },
+        { $group: { _id: null, total: { $sum: { $multiply: ['$currentStock', { $ifNull: ['$purchasePrice', 0] }] } } } },
       ]),
       Account.find(scoped(req, { isActive: true })).sort({ code: 1 }).lean(),
     ]);
@@ -85,8 +102,10 @@ exports.getFinancialSummary = async (req, res) => {
       payables: payables[0]?.total || 0,
       inventoryValue: inventoryValue[0]?.total || 0,
       accounts,
+      asOf: new Date().toISOString(),
+      businessDate: kathmanduYmd(),
     };
-    await cacheSet(cacheKey, data, 45);
+    await cacheSet(cacheKey, data, 30);
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -96,27 +115,24 @@ exports.getFinancialSummary = async (req, res) => {
 exports.getProfitLoss = async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    const dateFilter = {};
-    if (startDate) dateFilter.$gte = new Date(startDate);
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      dateFilter.$lte = end;
-    }
+    const dateFilter = parseBusinessDateRange(startDate, endDate) || {};
     const matchDate = Object.keys(dateFilter).length ? { createdAt: dateFilter } : {};
     const expenseDate = Object.keys(dateFilter).length ? { date: dateFilter } : {};
 
     const [salesRevenue, purchaseCost, expenses, incomeAccounts, expenseAccounts] = await Promise.all([
       Sale.aggregate([
-        scopedMatch(req, { type: 'invoice', status: 'completed', ...matchDate }),
-        { $group: { _id: null, total: { $sum: '$total' }, vat: { $sum: '$vatAmount' } } },
+        scopedMatch(req, revenueSaleMatch(matchDate)),
+        { $group: { _id: null, total: { $sum: netSaleAmount }, vat: { $sum: { $ifNull: ['$vatAmount', 0] } } } },
       ]),
       Purchase.aggregate([
         scopedMatch(req, { status: { $in: ['completed', 'received'] }, ...matchDate }),
         { $group: { _id: null, total: { $sum: '$total' } } },
       ]),
       Expense.aggregate([
-        scopedMatch(req, { status: 'approved', ...expenseDate }),
+        scopedMatch(req, {
+          $or: [{ status: 'approved' }, { status: { $exists: false } }],
+          ...expenseDate,
+        }),
         { $group: { _id: '$category', total: { $sum: '$amount' } } },
       ]),
       Account.find(scoped(req, { type: 'income', isActive: true })).sort({ code: 1 }).lean(),
@@ -213,6 +229,7 @@ exports.createExpense = async (req, res) => {
   try {
     const expense = await Expense.create({ ...req.body, createdBy: req.user._id });
     const populated = await Expense.findById(expense._id).populate('createdBy', 'name');
+    await invalidateShopCache(['dashboard', 'reports']);
     res.status(201).json({ success: true, data: populated });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -228,6 +245,7 @@ exports.updateExpense = async (req, res) => {
       { new: true, runValidators: true }
     ).populate('createdBy', 'name');
     if (!expense) return res.status(404).json({ success: false, message: 'Expense not found.' });
+    await invalidateShopCache(['dashboard', 'reports']);
     res.json({ success: true, data: expense });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -238,6 +256,7 @@ exports.deleteExpense = async (req, res) => {
   try {
     const expense = await Expense.findByIdAndDelete(req.params.id);
     if (!expense) return res.status(404).json({ success: false, message: 'Expense not found.' });
+    await invalidateShopCache(['dashboard', 'reports']);
     res.json({ success: true, message: 'Expense deleted.' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

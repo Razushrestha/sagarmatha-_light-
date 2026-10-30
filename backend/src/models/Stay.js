@@ -44,5 +44,7 @@ const staySchema = new mongoose.Schema({
 
 applyTenantPlugin(staySchema);
 staySchema.index({ tenantId: 1, status: 1, checkIn: -1 });
+staySchema.index({ tenantId: 1, room: 1, status: 1, checkIn: 1 });
+staySchema.index({ tenantId: 1, status: 1, checkIn: 1, checkOut: 1 });
 
 module.exports = mongoose.model('Stay', staySchema);

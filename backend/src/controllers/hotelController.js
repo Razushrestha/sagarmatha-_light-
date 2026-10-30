@@ -36,11 +36,29 @@ const Customer = require('../models/Customer');
 const CustomerPayment = require('../models/CustomerPayment');
 const Sale = require('../models/Sale');
 const { reconcileCustomerOutstanding } = require('../utils/salePayments');
+const { tenantKey, cacheGet, cacheSet, invalidateShopCache } = require('../utils/cache');
+
+async function bustHotelCache() {
+  // Hotel folio invoices feed dashboard/reports revenue and receivables.
+  await invalidateShopCache(['hotel', 'dashboard', 'reports']);
+}
 
 async function findHoldConflict(req, roomId, start, end, excludeId) {
-  const filter = scoped(req, { room: roomId, status: { $in: HOLD_STATUSES } });
+  const startBound = startOfKathmandu(start);
+  const endBound = startOfKathmandu(end);
+  const filter = scoped(req, {
+    room: roomId,
+    status: { $in: HOLD_STATUSES },
+    checkIn: endBound ? { $lt: endBound } : undefined,
+    $or: [
+      { checkOut: startBound ? { $gt: startBound } : { $exists: true } },
+      { checkOut: null },
+      { checkOut: { $exists: false } },
+    ],
+  });
+  if (!endBound) delete filter.checkIn;
   if (excludeId) filter._id = { $ne: excludeId };
-  const rows = await Stay.find(filter).lean();
+  const rows = await Stay.find(filter).select('guestName checkIn checkOut nights status room').lean();
   return rows.find((row) => overlapsRange(staySpan(row), start, end)) || null;
 }
 
@@ -122,6 +140,7 @@ exports.saveRoom = async (req, res) => {
     } else {
       room = await Room.create(payload);
     }
+    await bustHotelCache();
     res.json({ success: true, data: room });
   } catch (error) {
     if (error.code === 11000) return res.status(400).json({ success: false, message: 'That room already exists.' });
@@ -144,6 +163,7 @@ exports.setRoomStatus = async (req, res) => {
     if (req.body.assignedTo !== undefined) room.assignedTo = req.body.assignedTo || null;
     if (req.body.notes !== undefined) room.notes = req.body.notes;
     await room.save();
+    await bustHotelCache();
     res.json({ success: true, data: room });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -153,7 +173,11 @@ exports.setRoomStatus = async (req, res) => {
 exports.listStays = async (req, res) => {
   try {
     const filter = scoped(req);
-    if (req.query.status) filter.status = req.query.status;
+    if (req.query.status) {
+      const statuses = String(req.query.status).split(',').map((s) => s.trim()).filter(Boolean);
+      filter.status = statuses.length > 1 ? { $in: statuses } : statuses[0];
+    }
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
     const rows = await Stay.find(filter)
       .populate('room', 'number type status')
       .populate('folio', 'balance status')
@@ -161,7 +185,7 @@ exports.listStays = async (req, res) => {
       .populate('ratePlan', 'name kind mode')
       .populate('customer', 'name company')
       .sort({ checkIn: -1 })
-      .limit(100)
+      .limit(limit)
       .lean();
     const data = rows.map((stay) => {
       const span = staySpan(stay);
@@ -178,21 +202,30 @@ exports.getRack = async (req, res) => {
     const days = Math.min(31, Math.max(7, parseInt(req.query.days, 10) || 14));
     const from = parseYmd(req.query.from) || todayYmd();
     const rangeEnd = addDaysYmd(from, days);
+    const cacheKey = tenantKey(['hotel', 'rack', from, String(days)]);
+    const cached = await cacheGet(cacheKey);
+    if (cached) return res.json({ success: true, data: cached });
+
     const dates = Array.from({ length: days }, (_, i) => addDaysYmd(from, i));
     const fromDate = startOfKathmandu(from);
     const untilDate = startOfKathmandu(rangeEnd);
 
-    const rooms = await Room.find(scoped(req, { isActive: true })).sort({ number: 1 }).lean();
+    const rooms = await Room.find(scoped(req, { isActive: true }))
+      .select('number type rate status')
+      .sort({ number: 1 })
+      .lean();
     const stayRows = await Stay.find(scoped(req, {
       status: { $in: ['reserved', 'checked_in', 'checked_out'] },
+      checkIn: { $lt: untilDate },
       $or: [
-        { status: { $in: ['reserved', 'checked_in'] } },
-        { checkIn: { $lt: untilDate }, checkOut: { $gte: fromDate } },
+        { checkOut: { $gt: fromDate } },
+        { checkOut: null },
+        { checkOut: { $exists: false } },
       ],
     }))
+      .select('guestName guestPhone guestIdType guestIdNumber guestNationality guestAddress status checkIn checkOut nights room folio')
       .populate('room', 'number type status')
       .populate('folio', 'balance status')
-      .populate('roomSale', 'invoiceNumber total vatAmount irdStatus')
       .lean();
 
     const stays = stayRows.map(toRackStay).filter((stay) => overlapsRange(stay, from, rangeEnd));
@@ -201,7 +234,7 @@ exports.getRack = async (req, res) => {
       status: 'pending',
       checkIn: { $lt: untilDate },
       checkOut: { $gte: fromDate },
-    })).sort({ checkIn: 1 }).lean();
+    })).select('channel guestName roomType checkIn checkOut').sort({ checkIn: 1 }).lean();
 
     const pending = pendingRows.map((row) => ({
       _id: row._id,
@@ -244,9 +277,11 @@ exports.getRack = async (req, res) => {
       }))
       .sort((a, b) => a.date.localeCompare(b.date) || a.guestName.localeCompare(b.guestName));
 
+    const data = { today: todayYmd(), from, days, dates, rooms, stays, arrivals, departures, pending };
+    await cacheSet(cacheKey, data, 20);
     res.json({
       success: true,
-      data: { today: todayYmd(), from, days, dates, rooms, stays, arrivals, departures, pending },
+      data,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -323,7 +358,11 @@ async function persistStay(req, { status, occupyNow }) {
     await room.save();
     await chargeRoomStay(req, stay, room, folio);
   }
-  const data = await Stay.findById(stay._id).populate('room', 'number type').populate('folio').lean();
+  await bustHotelCache();
+  const data = await Stay.findById(stay._id)
+    .populate('room', 'number type')
+    .populate('folio', 'balance status')
+    .lean();
   return { data };
 }
 
@@ -377,7 +416,8 @@ exports.arrive = async (req, res) => {
     room.stay = stay._id;
     await room.save();
     await chargeRoomStay(req, stay, room, folio);
-    const data = await Stay.findById(stay._id).populate('room', 'number type').populate('folio').lean();
+    await bustHotelCache();
+    const data = await Stay.findById(stay._id).populate('room', 'number type').populate('folio', 'balance status').lean();
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -406,7 +446,8 @@ exports.cancelStay = async (req, res) => {
     stay.cancelledAt = new Date();
     stay.notes = [stay.notes, req.body.notes].filter(Boolean).join(' ').trim() || stay.notes;
     await stay.save();
-    const data = await Stay.findById(stay._id).populate('folio').lean();
+    await bustHotelCache();
+    const data = await Stay.findById(stay._id).populate('folio', 'balance status').lean();
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -435,7 +476,8 @@ exports.noShow = async (req, res) => {
     stay.status = 'no_show';
     stay.noShowAt = new Date();
     await stay.save();
-    const data = await Stay.findById(stay._id).populate('folio').lean();
+    await bustHotelCache();
+    const data = await Stay.findById(stay._id).populate('folio', 'balance status').lean();
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -532,6 +574,7 @@ exports.checkOut = async (req, res) => {
       room.stay = null;
       await room.save();
     }
+    await bustHotelCache();
     res.json({ success: true, data: stay });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -664,6 +707,7 @@ exports.settleFolio = async (req, res) => {
       method: req.body.method,
       bucket: req.body.bucket,
     });
+    await bustHotelCache();
     res.json({ success: true, data: presentFolio(folio.toObject()) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -679,13 +723,15 @@ exports.cityLedgerFolio = async (req, res) => {
     const customerId = req.body.customerId || folio.customer;
     const customer = await Customer.findOne(scoped(req, { _id: customerId, isActive: true }));
     if (!customer) return res.status(400).json({ success: false, message: 'Pick a company or travel agent to bill.' });
-    await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customer._id);
-    const fresh = await Customer.findById(customer._id);
-    if (!creditCapOk(fresh, amount)) {
-      return res.status(400).json({
-        success: false,
-        message: `Credit limit ${fresh.creditLimit} exceeded (already due ${fresh.outstanding}).`,
-      });
+    if (!creditCapOk(customer, amount)) {
+      await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customer._id);
+      const fresh = await Customer.findById(customer._id).select('creditLimit outstanding').lean();
+      if (!creditCapOk(fresh || customer, amount)) {
+        return res.status(400).json({
+          success: false,
+          message: `Credit limit ${(fresh || customer).creditLimit} exceeded (already due ${(fresh || customer).outstanding}).`,
+        });
+      }
     }
     folio.customer = customer._id;
     await Sale.updateMany(
@@ -708,6 +754,7 @@ exports.cityLedgerFolio = async (req, res) => {
     });
     await folio.save();
     await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customer._id);
+    await bustHotelCache();
     const presented = presentFolio(folio.toObject());
     res.json({ success: true, data: { ...presented, customer: { _id: customer._id, name: customer.name, company: customer.company } } });
   } catch (error) {
@@ -728,6 +775,7 @@ exports.depositFolio = async (req, res) => {
       method: req.body.method,
       bucket: req.body.bucket,
     });
+    await bustHotelCache();
     res.json({ success: true, data: presentFolio(folio.toObject()) });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -797,7 +845,8 @@ exports.extendStay = async (req, res) => {
         description: `Room ${room.number} extra ${extra} night${extra === 1 ? '' : 's'}`,
       });
     }
-    const data = await Stay.findById(stay._id).populate('room', 'number type').populate('folio').populate('roomSale', 'invoiceNumber total vatAmount').lean();
+    await bustHotelCache();
+    const data = await Stay.findById(stay._id).populate('room', 'number type').populate('folio', 'balance status').populate('roomSale', 'invoiceNumber total vatAmount').lean();
     res.json({ success: true, data: { ...data, ...staySpan(data) } });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -835,7 +884,8 @@ exports.moveStay = async (req, res) => {
       nextRoom.stay = stay._id;
       await nextRoom.save();
     }
-    const data = await Stay.findById(stay._id).populate('room', 'number type rate').populate('folio').lean();
+    await bustHotelCache();
+    const data = await Stay.findById(stay._id).populate('room', 'number type rate').populate('folio', 'balance status').lean();
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -866,7 +916,8 @@ exports.changeRate = async (req, res) => {
         description: `Room ${room.number} rate change NPR ${delta}/night × ${remaining}`,
       });
     }
-    const data = await Stay.findById(stay._id).populate('room', 'number type').populate('folio').populate('roomSale', 'invoiceNumber total vatAmount').lean();
+    await bustHotelCache();
+    const data = await Stay.findById(stay._id).populate('room', 'number type').populate('folio', 'balance status').populate('roomSale', 'invoiceNumber total vatAmount').lean();
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -967,16 +1018,26 @@ exports.closeNight = async (req, res) => {
     const existing = await NightAudit.findOne(scoped(req, { date, status: 'closed' }));
     if (existing) return res.status(400).json({ success: false, message: 'That hotel date is already closed.' });
 
-    const reserved = await Stay.find(scoped(req, { status: 'reserved' })).populate('room', 'number');
+    const reserved = await Stay.find(scoped(req, { status: 'reserved' }))
+      .select('guestName room checkIn checkOut nights status')
+      .populate('room', 'number')
+      .lean();
+    const noShowIds = [];
     const noShows = [];
+    const now = new Date();
     for (const stay of reserved) {
       if (staySpan(stay).start > date) continue;
-      stay.status = 'no_show';
-      stay.noShowAt = new Date();
-      await stay.save();
+      noShowIds.push(stay._id);
       noShows.push({ stay: stay._id, guestName: stay.guestName, room: stay.room?.number });
     }
+    if (noShowIds.length) {
+      await Stay.updateMany(
+        { _id: { $in: noShowIds } },
+        { $set: { status: 'no_show', noShowAt: now } }
+      );
+    }
 
+    await bustHotelCache();
     const snapshot = await hotelDayReport(req, date);
     const row = await NightAudit.create({
       date,

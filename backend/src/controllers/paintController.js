@@ -127,7 +127,7 @@ exports.mix = async (req, res) => {
       warehouseId: req.body.warehouseId || req.body.warehouse,
       userId: req.user._id,
     });
-    await invalidateShopCache(['products', 'dashboard']);
+    await invalidateShopCache(['products', 'dashboard', 'reports']);
     res.status(201).json({ success: true, data });
   } catch (error) {
     res.status(error.statusCode || 400).json({ success: false, message: error.message });

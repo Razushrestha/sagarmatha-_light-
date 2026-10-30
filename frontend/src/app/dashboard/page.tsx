@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import StatsCard from "@/components/ui/StatsCard";
@@ -9,7 +9,7 @@ import { saleAPI } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import {
   DollarSign, ShoppingBag, Package, Users, AlertTriangle,
-  TrendingUp, CreditCard, ArrowUpRight,
+  TrendingUp, CreditCard, ArrowUpRight, RefreshCw,
 } from "lucide-react";
 
 const SalesTrendChart = dynamic(() => import("@/components/dashboard/SalesTrendChart"), {
@@ -43,13 +43,33 @@ const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    saleAPI.getDashboard()
+  const load = useCallback((fresh = true) => {
+    if (fresh) setRefreshing(true);
+    else setLoading(true);
+    saleAPI.getDashboard(fresh ? { refresh: "1" } : undefined)
       .then((res) => setData(res.data.data))
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, []);
+
+  useEffect(() => {
+    load(true);
+    const onFocus = () => load(true);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load(true);
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [load]);
 
   const chartData = (() => {
     const trend = data?.monthlyTrend || [];
@@ -79,7 +99,15 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
-      <PageHeader title="Dashboard" />
+      <PageHeader
+        title="Dashboard"
+        action={(
+          <button type="button" className="btn-secondary text-sm inline-flex items-center gap-2" onClick={() => load(true)} disabled={refreshing}>
+            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        )}
+      />
 
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">

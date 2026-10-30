@@ -4,6 +4,9 @@ const nextConfig = {
   compress: true,
   productionBrowserSourceMaps: false,
   reactStrictMode: true,
+  experimental: {
+    optimizePackageImports: ["lucide-react", "recharts", "date-fns"],
+  },
   // OneDrive sync corrupts webpack filesystem cache during both dev and build
   webpack: (config) => {
     config.cache = false;

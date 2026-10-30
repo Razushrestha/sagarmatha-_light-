@@ -1,3 +1,14 @@
+const path = require("path");
+const fs = require("fs");
+
+// Prefer backend/.env so production BACKEND_PORT (e.g. 5016) wins over defaults.
+const envPath = path.join(__dirname, "backend", ".env");
+if (fs.existsSync(envPath)) {
+  require(path.join(__dirname, "backend", "node_modules", "dotenv")).config({
+    path: envPath,
+  });
+}
+
 const {
   frontendPort,
   backendPort,

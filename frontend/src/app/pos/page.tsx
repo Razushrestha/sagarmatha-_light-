@@ -286,16 +286,19 @@ export default function POSPage() {
 
   useEffect(() => {
     if (!draftReady) return;
-    savePosDraft({
-      cart,
-      electricianId,
-      warehouseId,
-      priceLevel,
-      invoiceDiscount,
-      includeVat,
-      selectedPaymentMethod,
-      selectedCustomer,
-    });
+    const timer = setTimeout(() => {
+      savePosDraft({
+        cart,
+        electricianId,
+        warehouseId,
+        priceLevel,
+        invoiceDiscount,
+        includeVat,
+        selectedPaymentMethod,
+        selectedCustomer,
+      });
+    }, 400);
+    return () => clearTimeout(timer);
   }, [draftReady, cart, electricianId, warehouseId, priceLevel, invoiceDiscount, includeVat, selectedPaymentMethod, selectedCustomer]);
 
   useEffect(() => {

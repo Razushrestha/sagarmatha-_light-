@@ -91,7 +91,9 @@ async function repairCreditSales(Sale) {
 }
 
 async function reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customerId) {
-  const customer = await Customer.findById(customerId);
+  const customer = await Customer.findById(customerId)
+    .select('openingDebt openingCredit openingBalance totalPurchases totalPaid outstanding creditBalance')
+    .lean();
   if (!customer) return;
 
   const sales = await Sale.find({
@@ -99,10 +101,13 @@ async function reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, cus
     type: { $in: ['invoice', 'estimate'] },
     status: { $nin: ['cancelled', 'draft'] },
     isHeld: { $ne: true },
-  });
+  })
+    .select('total returnedTotal refundedAmount payments amountPaid amountDue')
+    .lean();
 
   let totalPurchases = 0;
   let totalDue = 0;
+  const saleOps = [];
 
   for (const sale of sales) {
     const originalTotal = Number(sale.total) || 0;
@@ -134,13 +139,18 @@ async function reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, cus
       Math.abs((sale.amountPaid || 0) - amountPaid) > 0.009
       || Math.abs((sale.amountDue || 0) - amountDue) > 0.009
     ) {
-      sale.amountPaid = amountPaid;
-      sale.amountDue = amountDue;
-      await sale.save();
+      saleOps.push({
+        updateOne: {
+          filter: { _id: sale._id },
+          update: { $set: { amountPaid, amountDue } },
+        },
+      });
     }
     totalPurchases += netTotal;
     totalDue += amountDue;
   }
+
+  if (saleOps.length) await Sale.bulkWrite(saleOps, { ordered: false });
 
   const openingDebt = Math.max(0, customer.openingDebt ?? Math.max(0, customer.openingBalance || 0));
   const openingCredit = Math.max(0, customer.openingCredit ?? Math.max(0, -(customer.openingBalance || 0)));
@@ -150,11 +160,17 @@ async function reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, cus
   const targetCredit = creditFromBuckets(openingCredit, cashOnInvoices, buckets);
   const targetPaid = cashOnInvoices;
 
-  customer.totalPurchases = totalPurchases;
-  customer.totalPaid = targetPaid;
-  customer.outstanding = targetDebt;
-  customer.creditBalance = targetCredit;
-  await customer.save();
+  await Customer.updateOne(
+    { _id: customer._id },
+    {
+      $set: {
+        totalPurchases,
+        totalPaid: targetPaid,
+        outstanding: targetDebt,
+        creditBalance: targetCredit,
+      },
+    }
+  );
 }
 
 async function reconcileAllCustomers(Customer, Sale, CustomerPayment) {

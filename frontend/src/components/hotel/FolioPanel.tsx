@@ -61,9 +61,10 @@ export default function FolioPanel({ folioId, onChanged }: { folioId: string; on
       .catch(() => toast.error("Could not load folio"));
   }, [folioId]);
 
-  useEffect(() => {
-    customerAPI.getAll({ limit: "100" }).then((r) => setCustomers(r.data.data || [])).catch(() => {});
-  }, []);
+  const ensureCustomers = useCallback(() => {
+    if (customers.length) return;
+    customerAPI.getAll({ limit: "50" }).then((r) => setCustomers(r.data.data || [])).catch(() => {});
+  }, [customers.length]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -240,7 +241,12 @@ export default function FolioPanel({ folioId, onChanged }: { folioId: string; on
           <div className="w-full flex flex-wrap gap-2 items-end">
             <div className="flex-1 min-w-[12rem]">
               <label className="label">Bill to company</label>
-              <select className="input-field" value={billTo} onChange={(e) => setBillTo(e.target.value)}>
+              <select
+                className="input-field"
+                value={billTo}
+                onFocus={ensureCustomers}
+                onChange={(e) => setBillTo(e.target.value)}
+              >
                 <option value="">Company / agent</option>
                 {customers.map((row) => (
                   <option key={row._id} value={row._id}>{row.company || row.name}</option>

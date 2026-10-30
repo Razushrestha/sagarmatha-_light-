@@ -308,6 +308,7 @@ exports.getHeldSales = async (req, res) => {
     const held = await Sale.find(scoped(req, { isHeld: true }))
       .populate('customer', 'name phone')
       .sort({ heldAt: -1 })
+      .limit(100)
       .lean();
     res.json({ success: true, data: held });
   } catch (error) {
@@ -799,40 +800,42 @@ exports.getReturn = async (req, res) => {
 
 exports.getDashboardStats = async (req, res) => {
   try {
-    const cacheKey = tenantKey(['dashboard', 'stats']);
-    const cached = await cacheGet(cacheKey);
-    if (cached) return res.json({ success: true, data: cached });
+    const {
+      TZ,
+      todayStartKathmandu,
+      monthStartKathmandu,
+      monthsBackStartKathmandu,
+      kathmanduYmd,
+      netSaleAmount,
+      revenueSaleMatch,
+    } = require('../utils/businessDates');
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const cacheKey = tenantKey(['dashboard', 'stats', kathmanduYmd()]);
+    const forceRefresh = ['1', 'true', 'yes'].includes(String(req.query.refresh || '').toLowerCase());
+    if (!forceRefresh) {
+      const cached = await cacheGet(cacheKey);
+      if (cached) return res.json({ success: true, data: cached });
+    }
+
+    const todayStart = todayStartKathmandu();
+    const monthStart = monthStartKathmandu();
+    const trendStart = monthsBackStartKathmandu(11);
 
     const Product = require('../models/Product');
     const Customer = require('../models/Customer');
     const Supplier = require('../models/Supplier');
-    const netAmount = { $subtract: [{ $ifNull: ['$total', 0] }, { $ifNull: ['$returnedTotal', 0] }] };
 
     const [
       todaySales, monthSales, totalProducts, lowStockProducts,
       totalCustomers, totalReceivable, totalPayable, recentSales, monthlyTrend,
     ] = await Promise.all([
       Sale.aggregate([
-        scopedMatch(req, {
-          type: 'invoice',
-          status: { $nin: ['cancelled', 'draft'] },
-          isHeld: { $ne: true },
-          createdAt: { $gte: today },
-        }),
-        { $group: { _id: null, total: { $sum: netAmount }, count: { $sum: 1 } } },
+        scopedMatch(req, revenueSaleMatch({ createdAt: { $gte: todayStart } })),
+        { $group: { _id: null, total: { $sum: netSaleAmount }, count: { $sum: 1 } } },
       ]),
       Sale.aggregate([
-        scopedMatch(req, {
-          type: 'invoice',
-          status: { $nin: ['cancelled', 'draft'] },
-          isHeld: { $ne: true },
-          createdAt: { $gte: monthStart },
-        }),
-        { $group: { _id: null, total: { $sum: netAmount }, count: { $sum: 1 } } },
+        scopedMatch(req, revenueSaleMatch({ createdAt: { $gte: monthStart } })),
+        { $group: { _id: null, total: { $sum: netSaleAmount }, count: { $sum: 1 } } },
       ]),
       Product.countDocuments(scoped(req, { isActive: true })),
       Product.aggregate([
@@ -841,28 +844,29 @@ exports.getDashboardStats = async (req, res) => {
         { $count: 'n' },
       ]).then((rows) => rows[0]?.n || 0),
       Customer.countDocuments(scoped(req, { isActive: true })),
-      Customer.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
-      Supplier.aggregate([scopedMatch(req), { $group: { _id: null, total: { $sum: '$outstanding' } } }]),
-      Sale.find(scoped(req, { type: 'invoice' }))
-        .select('invoiceNumber total customer customerName createdAt')
+      Customer.aggregate([
+        scopedMatch(req, { isActive: { $ne: false } }),
+        { $group: { _id: null, total: { $sum: { $ifNull: ['$outstanding', 0] } } } },
+      ]),
+      Supplier.aggregate([
+        scopedMatch(req, { isActive: { $ne: false } }),
+        { $group: { _id: null, total: { $sum: { $ifNull: ['$outstanding', 0] } } } },
+      ]),
+      Sale.find(scoped(req, revenueSaleMatch()))
+        .select('invoiceNumber total returnedTotal customer customerName createdAt status')
         .populate('customer', 'name')
         .sort({ createdAt: -1 })
-        .limit(5)
+        .limit(8)
         .lean(),
       Sale.aggregate([
-        scopedMatch(req, {
-          type: 'invoice',
-          status: { $nin: ['cancelled', 'draft'] },
-          isHeld: { $ne: true },
-          createdAt: { $gte: new Date(today.getFullYear(), today.getMonth() - 11, 1) },
-        }),
+        scopedMatch(req, revenueSaleMatch({ createdAt: { $gte: trendStart } })),
         {
           $group: {
             _id: {
-              year: { $year: { date: '$createdAt', timezone: 'Asia/Kathmandu' } },
-              month: { $month: { date: '$createdAt', timezone: 'Asia/Kathmandu' } },
+              year: { $year: { date: '$createdAt', timezone: TZ } },
+              month: { $month: { date: '$createdAt', timezone: TZ } },
             },
-            total: { $sum: netAmount },
+            total: { $sum: netSaleAmount },
             count: { $sum: 1 },
           },
         },
@@ -874,10 +878,12 @@ exports.getDashboardStats = async (req, res) => {
       monthlyTrend.map((row) => [`${row._id.year}-${row._id.month}`, row])
     );
     const filledTrend = [];
+    const todayYmd = kathmanduYmd();
+    const [ty, tm] = todayYmd.split('-').map(Number);
     for (let i = 11; i >= 0; i -= 1) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      const year = d.getFullYear();
-      const month = d.getMonth() + 1;
+      const totalMonths = ty * 12 + (tm - 1) - i;
+      const year = Math.floor(totalMonths / 12);
+      const month = (totalMonths % 12) + 1;
       const found = monthlyMap.get(`${year}-${month}`);
       filledTrend.push({
         _id: { year, month },
@@ -896,10 +902,15 @@ exports.getDashboardStats = async (req, res) => {
       totalCustomers,
       totalReceivable: totalReceivable[0]?.total || 0,
       totalPayable: totalPayable[0]?.total || 0,
-      recentSales,
+      recentSales: recentSales.map((sale) => ({
+        ...sale,
+        total: Math.max(0, (Number(sale.total) || 0) - (Number(sale.returnedTotal) || 0)),
+      })),
       monthlyTrend: filledTrend,
+      asOf: new Date().toISOString(),
+      businessDate: todayYmd,
     };
-    await cacheSet(cacheKey, data, 45);
+    await cacheSet(cacheKey, data, 30);
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

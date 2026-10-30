@@ -53,7 +53,7 @@ app.use(cors({
 }));
 
 app.use(requestTiming);
-app.use(morgan(isProd ? 'combined' : 'dev', {
+app.use(morgan(isProd ? 'tiny' : 'dev', {
   skip: (req) => req.path === '/api/health',
 }));
 app.use(express.json({ limit: '2mb' }));

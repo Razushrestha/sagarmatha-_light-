@@ -95,6 +95,12 @@ async function issueFolioSale(req, stay, folio, {
   if (setRoomSale) stay.roomSale = sale._id;
   stay.roomSales = [...(stay.roomSales || []).map((id) => id), sale._id];
   await stay.save();
+  try {
+    const { invalidateShopCache } = require('../utils/cache');
+    await invalidateShopCache(['dashboard', 'reports', 'products', 'hotel']);
+  } catch {
+    // cache optional
+  }
   return sale;
 }
 
