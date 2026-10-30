@@ -12,7 +12,7 @@ function cashOf(sale) {
 async function summarizeWindow(req, from, to) {
   const range = { $gte: from, $lte: to };
   const sales = await Sale.find(scoped(req, {
-    type: 'invoice',
+    type: { $in: ['invoice', 'estimate'] },
     status: { $in: ['completed', 'partial_return', 'returned'] },
     isHeld: { $ne: true },
     createdAt: range,

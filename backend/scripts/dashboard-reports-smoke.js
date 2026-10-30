@@ -85,7 +85,10 @@ function unitChecks() {
   t.ok('12-month lookback older than month start', trend.getTime() <= month.getTime());
 
   const match = revenueSaleMatch({ createdAt: { $gte: start } });
-  t.ok('revenue match type invoice', match.type === 'invoice');
+  t.ok('revenue match includes invoice + estimate',
+    Array.isArray(match.type.$in)
+    && match.type.$in.includes('invoice')
+    && match.type.$in.includes('estimate'));
   t.ok('includes completed + partial_return',
     Array.isArray(match.status.$in)
     && match.status.$in.includes('completed')

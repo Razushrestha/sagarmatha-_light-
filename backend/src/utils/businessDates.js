@@ -51,13 +51,16 @@ function monthsBackStartKathmandu(months = 11, ref = new Date()) {
 /** Sale statuses that count as real shop revenue (exclude drafts/cancelled/held). */
 const REVENUE_STATUSES = ['completed', 'partial_return'];
 
+/** POS “VAT bill” = invoice, “Estimate bill” = estimate — both are completed shop sales. */
+const REVENUE_TYPES = ['invoice', 'estimate'];
+
 const netSaleAmount = {
   $subtract: [{ $ifNull: ['$total', 0] }, { $ifNull: ['$returnedTotal', 0] }],
 };
 
 function revenueSaleMatch(extra = {}) {
   return {
-    type: 'invoice',
+    type: { $in: REVENUE_TYPES },
     status: { $in: REVENUE_STATUSES },
     isHeld: { $ne: true },
     ...extra,
@@ -74,6 +77,7 @@ module.exports = {
   parseBusinessDateRange,
   monthsBackStartKathmandu,
   REVENUE_STATUSES,
+  REVENUE_TYPES,
   netSaleAmount,
   revenueSaleMatch,
 };
