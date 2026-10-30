@@ -24,7 +24,9 @@ const nextConfig = {
     ];
   },
   async rewrites() {
-    const backendPort = process.env.BACKEND_PORT || 5000;
+    // Prefer explicit BACKEND_URL. Default 5016 so production builds do not
+    // accidentally proxy to whatever else is bound on :5000 on shared hosts.
+    const backendPort = process.env.BACKEND_PORT || 5016;
     const backend = process.env.BACKEND_URL || `http://127.0.0.1:${backendPort}`;
     return [
       { source: "/api/:path*", destination: `${backend}/api/:path*` },
