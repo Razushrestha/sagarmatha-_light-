@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import { cafeAPI, productAPI } from "@/lib/api";
@@ -28,20 +28,20 @@ export default function CafeRecipesPage() {
   const [saving, setSaving] = useState(false);
   const [margins, setMargins] = useState<Array<{ _id: string; name: string; sellingPrice: number; cost: number; profit: number; margin: number }>>([]);
 
-  const load = () => {
+  const load = useCallback(() => {
     cafeAPI.getMenu().then((res) => {
       const rows = res.data.data || [];
       setMenu(rows);
-      if (!selectedId && rows[0]) setSelectedId(rows[0]._id);
+      setSelectedId((prev) => prev || rows[0]?._id || "");
     }).catch(() => {});
     productAPI.getAll({ limit: "200" }).then((res) => {
       const rows: ProductOpt[] = res.data.data || [];
       setIngredients(rows.filter((row) => row.attrs?.role === "ingredient" || !row.attrs?.recipe?.length));
     }).catch(() => {});
     cafeAPI.getMargins().then((res) => setMargins(res.data.data || [])).catch(() => {});
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     const product = menu.find((row) => row._id === selectedId);

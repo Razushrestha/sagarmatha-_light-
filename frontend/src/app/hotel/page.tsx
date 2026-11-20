@@ -108,7 +108,7 @@ export default function HotelPage() {
     setSelectedGuest(guestFromStay(selectedStay));
     setSecondGuestName(selectedStay?.secondGuestName || "");
     setSecondGuestPhone(selectedStay?.secondGuestPhone || "");
-  }, [selectedStayId, selectedStay?.guestName, selectedStay?.guestPhone, selectedStay?.guestEmail, selectedStay?.guestIdNumber, selectedStay?.guestAddress, selectedStay?.secondGuestName, selectedStay?.secondGuestPhone]);
+  }, [selectedStay]);
 
   const fillGuest = (phone: string, apply: (guest: GuestDraft) => void) => {
     const q = phone.trim();

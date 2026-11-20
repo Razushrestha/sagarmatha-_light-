@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
@@ -48,7 +48,7 @@ export default function CategoriesPage() {
   const [brandName, setBrandName] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const load = () => {
+  const load = useCallback(() => {
     Promise.all([
       miscAPI.getCategories(),
       miscAPI.getBrands(),
@@ -59,9 +59,9 @@ export default function CategoriesPage() {
     if (tintingOn) {
       productAPI.getAll({ limit: "200" }).then((res) => setProducts(res.data.data || [])).catch(() => {});
     }
-  };
+  }, [tintingOn]);
 
-  useEffect(() => { load(); }, [tintingOn]);
+  useEffect(() => { load(); }, [load]);
 
   const relatedIdOf = (row: RelatedProduct | string) => (typeof row === "string" ? row : row._id);
 

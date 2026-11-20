@@ -48,7 +48,6 @@ function ReturnPrintInner() {
     .map((id) => id.trim())
     .filter(Boolean)
     .join(",");
-  const ids = idKey ? idKey.split(",") : [];
 
   const [bills, setBills] = useState<ReturnBill[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -66,6 +65,7 @@ function ReturnPrintInner() {
   }, []);
 
   useEffect(() => {
+    const ids = idKey ? idKey.split(",") : [];
     if (!ids.length) {
       setLoading(false);
       return;

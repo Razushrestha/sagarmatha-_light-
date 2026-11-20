@@ -270,6 +270,22 @@ export default function POSPage() {
   const [draftReady, setDraftReady] = useState(false);
   const barcodeRef = useRef<HTMLInputElement>(null);
   const productSearchTimer = useRef<ReturnType<typeof setTimeout>>();
+  const productQueryRef = useRef({ recipesOn, selectedCategory, selectedBrand });
+  productQueryRef.current = { recipesOn, selectedCategory, selectedBrand };
+
+  const loadHeld = useCallback(() => saleAPI.getHeld().then((r) => setHeldSales(r.data.data)), []);
+
+  const loadProducts = useCallback(async (q?: string, categoryId?: string, brandId?: string) => {
+    const query = productQueryRef.current;
+    const params: Record<string, string> = { limit: query.recipesOn ? "200" : "80", pos: "1" };
+    if (q?.trim()) params.search = q.trim();
+    const cat = categoryId ?? query.selectedCategory;
+    const br = brandId ?? query.selectedBrand;
+    if (cat) params.category = cat;
+    if (br) params.brand = br;
+    const res = await productAPI.getAll(params);
+    setProducts(res.data.data);
+  }, []);
 
   useEffect(() => {
     const draft = loadPosDraft();
@@ -380,7 +396,7 @@ export default function POSPage() {
         .then((r) => setElectricians(r.data.data || []))
         .catch(() => {});
     }
-  }, [partnersOn]);
+  }, [partnersOn, loadProducts, loadHeld]);
 
   useEffect(() => {
     miscAPI.getSettings().then((r) => {
@@ -430,17 +446,6 @@ export default function POSPage() {
     return () => clearTimeout(timer);
   }, [customerSearch, customerPanel]);
 
-  const loadProducts = async (q?: string, categoryId?: string, brandId?: string) => {
-    const params: Record<string, string> = { limit: recipesOn ? "200" : "80", pos: "1" };
-    if (q?.trim()) params.search = q.trim();
-    const cat = categoryId ?? selectedCategory;
-    const br = brandId ?? selectedBrand;
-    if (cat) params.category = cat;
-    if (br) params.brand = br;
-    const res = await productAPI.getAll(params);
-    setProducts(res.data.data);
-  };
-
   const applyFilters = (categoryId: string, brandId: string) => {
     const params: Record<string, string> = { limit: recipesOn ? "200" : "80", pos: "1" };
     if (search.trim()) params.search = search.trim();
@@ -458,8 +463,6 @@ export default function POSPage() {
     setSelectedBrand(brandId);
     applyFilters(selectedCategory, brandId);
   };
-
-  const loadHeld = () => saleAPI.getHeld().then((r) => setHeldSales(r.data.data));
 
   const addToCart = useCallback((product: Product, extras?: { modifiers?: TicketModifier[]; complimentary?: boolean; compReason?: string }) => {
     const recipe = hasRecipe(product);

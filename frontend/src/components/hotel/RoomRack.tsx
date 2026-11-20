@@ -77,8 +77,8 @@ export default function RoomRack({
 }) {
   const today = data?.today || todayISO();
   const dates = data?.dates || Array.from({ length: 14 }, (_, i) => addDaysISO(i, from));
-  const rooms = data?.rooms || [];
-  const stays = data?.stays || [];
+  const rooms = useMemo(() => data?.rooms || [], [data?.rooms]);
+  const stays = useMemo(() => data?.stays || [], [data?.stays]);
   const occupyIndex = useMemo(() => buildOccupyIndex(stays, dates), [stays, dates]);
 
   const summary = useMemo(() => {
