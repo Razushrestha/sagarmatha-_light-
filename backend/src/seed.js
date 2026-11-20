@@ -149,6 +149,7 @@ const seed = async () => {
     phone: company.phone,
     email: company.email,
     vatNumber: company.vatNumber,
+    vatEnabled: true,
     vatRate: 13,
     paymentMethods: [
       { name: 'Cash', enabled: true },

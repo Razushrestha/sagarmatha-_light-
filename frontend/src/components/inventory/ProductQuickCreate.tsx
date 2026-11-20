@@ -91,6 +91,7 @@ export default function ProductQuickCreate({
         brands={brands}
         units={units}
         warehouses={warehouses}
+        onUnitCreated={(unit) => setUnits((prev) => (prev.some((u) => u._id === unit._id) ? prev : [...prev, unit]))}
         checkboxId="purchase-new-vatInclusive"
       />
       <div className="flex justify-end gap-2 mt-4">

@@ -121,6 +121,7 @@ export default function EditProductPage() {
             brands={brands}
             units={units}
             warehouses={warehouses}
+            onUnitCreated={(unit) => setUnits((prev) => (prev.some((u) => u._id === unit._id) ? prev : [...prev, unit]))}
             sellingLabel="Retail Price"
             stockLabel="Current Stock"
             showDealerPrice

@@ -9,6 +9,7 @@ import { FormField, SelectField } from "@/components/ui/FormField";
 import { FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { customerAPI } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
+import WhatsAppLedgerButton from "@/components/customers/WhatsAppLedgerButton";
 import { Wallet, Settings, ArrowDownCircle } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -116,10 +117,20 @@ export default function CustomerCreditPage() {
             ) : customers.map((c) => (
               <tr key={c._id} className="hover:bg-brand-50/50">
                 <td className="table-cell">
-                  <p className="font-medium">{c.name}</p>
+                  <Link
+                    href={`/customers/${c._id}?from=credit`}
+                    className="font-medium text-brand-800 hover:text-brand-950 hover:underline"
+                  >
+                    {c.name}
+                  </Link>
                   {c.company && <p className="text-xs text-brand-400">{c.company}</p>}
                 </td>
-                <td className="table-cell">{c.phone}</td>
+                <td className="table-cell">
+                  <div className="flex flex-col items-start">
+                    <span>{c.phone || "—"}</span>
+                    {c.phone ? <WhatsAppLedgerButton customerId={c._id} phone={c.phone} /> : null}
+                  </div>
+                </td>
                 <td className="table-cell capitalize">{c.customerType}</td>
                 <td className="table-cell">
                   <span className="flex items-center gap-1 text-emerald-700 font-semibold">
@@ -141,7 +152,7 @@ export default function CustomerCreditPage() {
                       <ArrowDownCircle className="w-3.5 h-3.5" /> Refund
                     </button>
                     <Link
-                      href={`/customers/debtors/${c._id}`}
+                      href={`/customers/${c._id}?from=credit`}
                       className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-900 border border-brand-200 rounded-lg px-3 py-1.5 hover:bg-brand-50"
                     >
                       <Settings className="w-3.5 h-3.5" /> Manage

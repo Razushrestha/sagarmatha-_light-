@@ -1,9 +1,13 @@
 "use client";
 
+import { useState } from "react";
+import toast from "react-hot-toast";
 import { FormField, SelectField } from "@/components/ui/FormField";
 import { FormSection, FormGrid, FormCheckbox } from "@/components/ui/FormLayout";
 import ImageUpload from "@/components/ui/ImageUpload";
+import Modal from "@/components/ui/Modal";
 import { useAuth } from "@/context/AuthContext";
+import { miscAPI } from "@/lib/api";
 import { PACK_LITRES, packLabel } from "@/lib/paint";
 
 export type ProductFormState = {
@@ -88,6 +92,7 @@ export default function ProductFormFields({
   brands,
   units,
   warehouses,
+  onUnitCreated,
   checkboxId = "vatInclusive",
   sellingLabel = "Selling Price",
   stockLabel = "Opening Stock",
@@ -102,6 +107,7 @@ export default function ProductFormFields({
   brands: Option[];
   units: Option[];
   warehouses: Option[];
+  onUnitCreated?: (unit: Option) => void;
   checkboxId?: string;
   sellingLabel?: string;
   stockLabel?: string;
@@ -113,6 +119,39 @@ export default function ProductFormFields({
   const tintingOn = hasModule("tinting");
   const recipesOn = hasModule("recipes");
   const tinted = form.paintRole === "tinted";
+  const [addUnitOpen, setAddUnitOpen] = useState(false);
+  const [unitName, setUnitName] = useState("");
+  const [unitShort, setUnitShort] = useState("");
+  const [savingUnit, setSavingUnit] = useState(false);
+
+  const openAddUnit = () => {
+    setUnitName("");
+    setUnitShort("");
+    setAddUnitOpen(true);
+  };
+
+  const saveUnit = async () => {
+    const name = unitName.trim();
+    if (!name) return toast.error("Unit name is required");
+    setSavingUnit(true);
+    try {
+      const res = await miscAPI.createUnit({
+        name,
+        shortName: unitShort.trim() || undefined,
+      });
+      const created = res.data.data as Option;
+      onUnitCreated?.(created);
+      update("unit", created._id);
+      setAddUnitOpen(false);
+      toast.success("Unit added");
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to add unit");
+    } finally {
+      setSavingUnit(false);
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
       <div className="xl:col-span-3">
@@ -177,8 +216,20 @@ export default function ProductFormFields({
         <FormSection title="Inventory">
           <FormGrid cols={4}>
             <FormField label="Unit">
-              <SelectField value={form.unit} onChange={(v) => update("unit", v)} placeholder="Select unit"
-                options={units.map((u) => ({ value: u._id, label: u.name }))} />
+              <div className="flex gap-2">
+                <div className="min-w-0 flex-1">
+                  <SelectField value={form.unit} onChange={(v) => update("unit", v)} placeholder="Select unit"
+                    options={units.map((u) => ({ value: u._id, label: u.name }))} />
+                </div>
+                <button
+                  type="button"
+                  onClick={openAddUnit}
+                  className="btn-secondary shrink-0 px-3 whitespace-nowrap"
+                  title="Add unit"
+                >
+                  + Add
+                </button>
+              </div>
             </FormField>
             <FormField label="Warehouse">
               <SelectField value={form.warehouse} onChange={(v) => update("warehouse", v)} placeholder="Select warehouse"
@@ -192,6 +243,40 @@ export default function ProductFormFields({
             </FormField>
           </FormGrid>
         </FormSection>
+
+        <Modal open={addUnitOpen} onClose={() => setAddUnitOpen(false)} title="Add unit" size="sm">
+          <div className="space-y-4">
+            <FormField label="Unit name" required>
+              <input
+                className="input-field"
+                value={unitName}
+                onChange={(e) => setUnitName(e.target.value)}
+                placeholder="e.g. Cup, Portion, Bottle"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void saveUnit();
+                  }
+                }}
+              />
+            </FormField>
+            <FormField label="Short name">
+              <input
+                className="input-field"
+                value={unitShort}
+                onChange={(e) => setUnitShort(e.target.value)}
+                placeholder="e.g. Cup, Port, Btl"
+              />
+            </FormField>
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" className="btn-secondary" onClick={() => setAddUnitOpen(false)}>Cancel</button>
+              <button type="button" className="btn-primary" disabled={savingUnit} onClick={() => void saveUnit()}>
+                {savingUnit ? "Saving..." : "Add unit"}
+              </button>
+            </div>
+          </div>
+        </Modal>
 
         {recipesOn && (
           <FormSection title="Cafe role" description="Ingredients are stocked. Menu items are made to order from a recipe.">

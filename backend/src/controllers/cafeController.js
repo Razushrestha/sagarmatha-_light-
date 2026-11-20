@@ -10,6 +10,7 @@ const {
   cleanGroups,
   cleanModifiers,
   catalogMargins,
+  stampRecipeItems,
 } = require('../services/recipeService');
 
 exports.listMenu = async (req, res) => {
@@ -111,15 +112,221 @@ exports.bookWaste = async (req, res) => {
 
 const DiningTable = require('../models/DiningTable');
 const PriceRule = require('../models/PriceRule');
+const Sale = require('../models/Sale');
+const Settings = require('../models/Settings');
 const { scoped } = require('../utils/tenantQuery');
-const { matchingHappyHour } = require('../utils/happyHour');
+const { matchingHappyHour, applyHappyHourToItems } = require('../utils/happyHour');
+const { getDefaultWarehouseId } = require('../utils/warehouse');
+const { cafeBillTotals } = require('../utils/cafeBill');
+const { nextInvoiceNumber } = require('../utils/invoiceNumber');
+
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+async function stampTintedItems(items) {
+  if (!Array.isArray(items) || !items.length) return items;
+  const ids = items.map((item) => item.product).filter(Boolean);
+  const products = await Product.find({ _id: { $in: ids } }).select('attrs').lean();
+  const byId = new Map(products.map((row) => [String(row._id), row]));
+  return items.map((item) => {
+    const product = byId.get(String(item.product));
+    const mark = Boolean(product?.attrs?.tinted);
+    return {
+      ...item,
+      tinted: mark,
+      shadeCode: mark ? (product.attrs.shadeCode || item.shadeCode) : item.shadeCode,
+    };
+  });
+}
+
+async function applyCafeTotalsToBody(req, body) {
+  const settings = await Settings.findOne().select('serviceChargePercent vatRate vatEnabled').lean();
+  const scPercent = Number(settings?.serviceChargePercent);
+  const vatOn = settings?.vatEnabled !== false;
+  const vatRate = vatOn ? Number(settings?.vatRate) : 0;
+  const serviceType = body.serviceType === 'takeaway' ? 'takeaway' : 'dine_in';
+  body.serviceType = serviceType;
+  const bill = cafeBillTotals({
+    food: Number(body.subtotal) || 0,
+    serviceChargePercent: Number.isFinite(scPercent) ? scPercent : 10,
+    vatRate: Number.isFinite(vatRate) ? vatRate : 13,
+    includeVat: vatOn && body.isVatBill !== false,
+    serviceType,
+  });
+  if (!vatOn) {
+    body.isVatBill = false;
+    body.type = body.type === 'quotation' ? body.type : 'estimate';
+  }
+  body.serviceChargePercent = serviceType === 'takeaway' ? 0 : (Number.isFinite(scPercent) ? scPercent : 10);
+  body.serviceChargeAmount = bill.serviceCharge;
+  body.vatAmount = bill.vatAmount;
+  body.total = bill.total;
+}
+
+function normalizeBillItems(rawItems) {
+  if (!Array.isArray(rawItems)) return [];
+  return rawItems
+    .map((item) => {
+      const quantity = Math.max(0.01, Number(item.quantity) || 0);
+      const unitPrice = Math.max(0, Number(item.unitPrice) || 0);
+      const discount = Math.max(0, Number(item.discount) || 0);
+      const discountType = item.discountType === 'fixed' ? 'fixed' : 'percent';
+      const gross = quantity * unitPrice;
+      const discountAmt = discountType === 'fixed' ? discount : (gross * discount) / 100;
+      const subtotal = round2(Math.max(0, gross - discountAmt));
+      const name = String(item.productName || item.name || '').trim();
+      if (!name || !(quantity > 0)) return null;
+      return {
+        product: item.product || undefined,
+        productName: name,
+        sku: item.sku || '',
+        quantity,
+        unitPrice,
+        discount,
+        discountType,
+        vatRate: Number(item.vatRate) || 13,
+        vatAmount: round2(Number(item.vatAmount) || 0),
+        subtotal,
+        costPrice: Number(item.costPrice) || round2(unitPrice * 0.7),
+        categoryName: item.categoryName || '',
+        modifiers: Array.isArray(item.modifiers) ? item.modifiers : [],
+        complimentary: Boolean(item.complimentary),
+        compReason: item.compReason || '',
+      };
+    })
+    .filter(Boolean);
+}
+
+async function syncTableFromSale(table, sale) {
+  if (sale && sale.isHeld) {
+    table.status = 'occupied';
+    table.sale = sale._id;
+  } else {
+    table.status = 'free';
+    table.sale = null;
+  }
+  await table.save();
+}
 
 exports.listTables = async (req, res) => {
   try {
-    const data = await DiningTable.find(scoped(req, { isActive: true })).sort({ name: 1 }).lean();
+    const tables = await DiningTable.find(scoped(req, { isActive: true })).sort({ name: 1 }).lean();
+    const tableIds = tables.map((row) => row._id);
+    const held = tableIds.length
+      ? await Sale.find(scoped(req, { isHeld: true, table: { $in: tableIds } }))
+        .select('table items subtotal total vatAmount serviceChargeAmount serviceChargePercent invoiceNumber customerName heldAt isVatBill')
+        .lean()
+      : [];
+    const byTable = new Map(held.map((sale) => [String(sale.table), sale]));
+    const data = tables.map((table) => {
+      const openBill = byTable.get(String(table._id)) || null;
+      return {
+        ...table,
+        status: openBill ? 'occupied' : (table.status || 'free'),
+        openBill,
+      };
+    });
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.getTableBill = async (req, res) => {
+  try {
+    const table = await DiningTable.findOne(scoped(req, { _id: req.params.id, isActive: true })).lean();
+    if (!table) return res.status(404).json({ success: false, message: 'Table not found.' });
+    const sale = await Sale.findOne(scoped(req, { table: table._id, isHeld: true }))
+      .populate('customer', 'name phone')
+      .lean();
+    res.json({ success: true, data: { table, sale } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.saveTableBill = async (req, res) => {
+  try {
+    const table = await DiningTable.findOne(scoped(req, { _id: req.params.id, isActive: true }));
+    if (!table) return res.status(404).json({ success: false, message: 'Table not found.' });
+
+    let items = normalizeBillItems(req.body.items);
+    let sale = await Sale.findOne(scoped(req, { table: table._id, isHeld: true }));
+
+    if (!items.length) {
+      if (sale) {
+        await Sale.deleteOne({ _id: sale._id });
+        sale = null;
+      }
+      await syncTableFromSale(table, null);
+      return res.json({ success: true, data: { table, sale: null } });
+    }
+
+    const warehouse = req.body.warehouse || (sale && sale.warehouse) || await getDefaultWarehouseId();
+    items = await stampTintedItems(items);
+    items = await stampRecipeItems(items);
+    const draft = {
+      items,
+      subtotal: round2(items.reduce((sum, item) => sum + (Number(item.subtotal) || 0), 0)),
+      isVatBill: req.body.isVatBill !== false,
+      serviceType: req.body.serviceType === 'takeaway' ? 'takeaway' : 'dine_in',
+    };
+    const rules = await PriceRule.find({ isActive: true }).lean();
+    const rule = matchingHappyHour(rules);
+    if (rule) {
+      draft.items = applyHappyHourToItems(draft.items, rule);
+      draft.subtotal = round2(draft.items.reduce((sum, item) => sum + (Number(item.subtotal) || 0), 0));
+      draft.happyHourPercent = rule.percentOff;
+    }
+    await applyCafeTotalsToBody(req, draft);
+
+    if (!sale) {
+      sale = await Sale.create({
+        type: 'invoice',
+        status: 'draft',
+        isHeld: true,
+        heldAt: new Date(),
+        invoiceNumber: await nextInvoiceNumber('INV'),
+        items: draft.items,
+        subtotal: draft.subtotal,
+        vatAmount: draft.vatAmount,
+        serviceChargeAmount: draft.serviceChargeAmount,
+        serviceChargePercent: draft.serviceChargePercent,
+        serviceType: draft.serviceType,
+        total: draft.total,
+        amountPaid: 0,
+        amountDue: draft.total,
+        payments: [],
+        isVatBill: draft.isVatBill,
+        warehouse,
+        table: table._id,
+        happyHourPercent: draft.happyHourPercent,
+        createdBy: req.user._id,
+      });
+    } else {
+      sale.items = draft.items;
+      sale.subtotal = draft.subtotal;
+      sale.vatAmount = draft.vatAmount;
+      sale.serviceChargeAmount = draft.serviceChargeAmount;
+      sale.serviceChargePercent = draft.serviceChargePercent;
+      sale.serviceType = draft.serviceType;
+      sale.total = draft.total;
+      sale.amountPaid = 0;
+      sale.amountDue = draft.total;
+      sale.isVatBill = draft.isVatBill;
+      sale.warehouse = warehouse;
+      sale.happyHourPercent = draft.happyHourPercent;
+      sale.heldAt = new Date();
+      await sale.save();
+    }
+
+    await syncTableFromSale(table, sale);
+    const populated = await Sale.findById(sale._id).populate('customer', 'name phone').lean();
+    await invalidateShopCache(['dashboard', 'reports']);
+    res.json({ success: true, data: { table, sale: populated } });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }
 };
 

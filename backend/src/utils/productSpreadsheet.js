@@ -2,6 +2,8 @@ const ExcelJS = require('exceljs');
 const Category = require('../models/Category');
 const Brand = require('../models/Brand');
 const Product = require('../models/Product');
+const { Unit } = require('../models/Unit');
+const { getDefaultWarehouseId } = require('./warehouse');
 
 const HEADERS = [
   { key: 'name', label: 'Name' },
@@ -23,7 +25,11 @@ const HEADER_ALIASES = {
   name: ['name', 'product', 'product name', 'item', 'item name'],
   sku: ['sku', 'code', 'item code', 'product code'],
   barcode: ['barcode', 'bar code', 'ean', 'upc'],
-  category: ['category', 'category name'],
+  category: [
+    'category', 'category name', 'product category', 'item category', 'cat',
+    'group', 'item group', 'product group', 'type', 'product type', 'class',
+  ],
+  subcategory: ['subcategory', 'sub category', 'sub-category', 'sub group'],
   brand: ['brand', 'brand name', 'manufacturer'],
   purchasePrice: ['purchase price', 'purchase', 'cost', 'cost price', 'buying price'],
   sellingPrice: ['selling price', 'selling', 'price', 'sale price', 'mrp', 'unit price', 'rate'],
@@ -50,13 +56,18 @@ function normalizeHeader(value) {
     .trim();
 }
 
+function headerMatches(label, aliases) {
+  if (aliases.includes(label)) return true;
+  return aliases.some((alias) => label === alias || label.endsWith(` ${alias}`) || label.startsWith(`${alias} `));
+}
+
 function mapHeaders(headerRow) {
   const map = {};
   headerRow.forEach((cell, index) => {
     const label = normalizeHeader(cell);
     if (!label) return;
     for (const [key, aliases] of Object.entries(HEADER_ALIASES)) {
-      if (aliases.includes(label) && map[key] == null) map[key] = index;
+      if (map[key] == null && headerMatches(label, aliases)) map[key] = index;
     }
   });
   return map;
@@ -100,18 +111,74 @@ function generateSku(name) {
   return `${base}-${Date.now().toString(36).slice(-5)}`.slice(0, 30);
 }
 
-async function resolveNamed(Model, name, cache) {
-  const trimmed = String(name || '').trim();
+function normalizeCatKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+const CATEGORY_RULES = [
+  { re: /\b(rccb|rcbo|elcb|mcb|mccb)\b/i, name: 'MCB & RCCB' },
+  { re: /\b(socket|plug point|power point)\b/i, name: 'Sockets' },
+  { re: /\b(switch|gang|modular|d\.?\s*p\.?|double pole)\b/i, name: 'Switches' },
+  { re: /\b(wire|cable|flexible|flex)\b/i, name: 'Wires & Cables' },
+  { re: /\b(bulb|tube light|panel light|downlight|luminaire|led)\b/i, name: 'Lighting' },
+  { re: /\b(fan)\b/i, name: 'Fans' },
+  { re: /\b(pipe|conduit)\b/i, name: 'Conduits & Pipes' },
+  { re: /\b(drill|grinder|tool)\b/i, name: 'Tools' },
+  { re: /\b(ups|inverter|battery)\b/i, name: 'Power Backup' },
+  { re: /\b(camera|cctv|dvr)\b/i, name: 'CCTV' },
+  { re: /\b(pump)\b/i, name: 'Pumps' },
+  { re: /\b(distribution board|\bdb\b|enclosure)\b/i, name: 'Distribution Boards' },
+  { re: /\b(bell|buzzer)\b/i, name: 'Bells' },
+  { re: /\b(holder|batten)\b/i, name: 'Holders' },
+];
+
+function inferCategoryFromProductName(name) {
+  const text = String(name || '');
+  for (const rule of CATEGORY_RULES) {
+    if (rule.re.test(text)) return rule.name;
+  }
+  return '';
+}
+
+function titleCategory(name) {
+  return String(name || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b([a-z])/g, (m) => m.toUpperCase());
+}
+
+function matchExistingCategory(name, existing) {
+  const key = normalizeCatKey(name);
+  if (!key) return null;
+  const exact = existing.find((c) => normalizeCatKey(c.name) === key);
+  if (exact) return exact;
+  const stem = key.replace(/s$/, '');
+  return existing.find((c) => normalizeCatKey(c.name).replace(/s$/, '') === stem) || null;
+}
+
+async function resolveNamed(Model, name, cache, extras = {}) {
+  const trimmed = titleCategory(name);
   if (!trimmed) return undefined;
   const key = `${Model.modelName}:${trimmed.toLowerCase()}`;
   if (cache.has(key)) return cache.get(key);
-  const existing = await Model.findOne({ name: new RegExp(`^${escapeRegex(trimmed)}$`, 'i') });
+  const existing = extras.existing
+    ? matchExistingCategory(trimmed, extras.existing)
+    : await Model.findOne({ name: new RegExp(`^${escapeRegex(trimmed)}$`, 'i') });
   if (existing) {
     cache.set(key, existing._id);
     return existing._id;
   }
   try {
-    const created = await Model.create({ name: trimmed });
+    const created = await Model.create({
+      name: trimmed,
+      isActive: true,
+      ...(extras.parent ? { parent: extras.parent } : {}),
+    });
+    if (Array.isArray(extras.existing)) extras.existing.push({ _id: created._id, name: created.name });
+    if (typeof extras.onCreate === 'function') extras.onCreate(created);
     cache.set(key, created._id);
     return created._id;
   } catch (error) {
@@ -124,6 +191,30 @@ async function resolveNamed(Model, name, cache) {
     }
     throw error;
   }
+}
+
+async function resolveCategory({ explicit, subcategory, productName, brandName, cache, existing, onCreate }) {
+  let fromFile = String(explicit || '').trim();
+  if (fromFile && brandName && fromFile.toLowerCase() === String(brandName).trim().toLowerCase()) {
+    fromFile = '';
+  }
+  const inferred = inferCategoryFromProductName(productName);
+  const raw = fromFile || inferred;
+  if (!raw && !subcategory) return undefined;
+
+  const parts = String(raw || inferred)
+    .split(/\s*[>\/|,]\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const parentName = parts.length > 1 ? parts[0] : (fromFile || inferred);
+  const leafName = String(subcategory || '').trim() || (parts.length > 1 ? parts[parts.length - 1] : parentName);
+  if (!leafName) return undefined;
+
+  let parentId;
+  if (parentName && leafName && normalizeCatKey(parentName) !== normalizeCatKey(leafName)) {
+    parentId = await resolveNamed(Category, parentName, cache, { existing, onCreate });
+  }
+  return resolveNamed(Category, leafName, cache, { existing, onCreate, parent: parentId });
 }
 
 function productToRow(product) {
@@ -288,7 +379,7 @@ function findHeaderRow(rawRows) {
   return best;
 }
 
-async function importRows(rawRows) {
+async function importRows(rawRows, options = {}) {
   if (!rawRows.length) {
     return { created: 0, updated: 0, skipped: 0, errors: [{ row: 1, message: 'The file is empty.' }] };
   }
@@ -309,8 +400,18 @@ async function importRows(rawRows) {
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  let categoriesCreated = 0;
   const errors = [];
   const nameCache = new Map();
+  const categoryLinks = new Map();
+  const existingCategories = await Category.find({ isActive: { $ne: false } }).select('_id name').lean();
+  const warehouseId = options.warehouseId || await getDefaultWarehouseId();
+  const supplierId = options.supplierId || undefined;
+  let defaultUnitId = options.unitId || undefined;
+  if (!defaultUnitId) {
+    const unit = await Unit.findOne({ isActive: true }).sort({ name: 1 }).select('_id').lean();
+    defaultUnitId = unit?._id;
+  }
 
   for (let i = headerIndex + 1; i < rawRows.length; i += 1) {
     const raw = rawRows[i];
@@ -342,8 +443,18 @@ async function importRows(rawRows) {
     try {
       const payload = { name, sku, sellingPrice };
       if (has('barcode')) payload.barcode = get('barcode') || undefined;
-      if (has('category')) payload.category = await resolveNamed(Category, get('category'), nameCache);
-      if (has('brand')) payload.brand = await resolveNamed(Brand, get('brand'), nameCache);
+      const brandName = has('brand') ? get('brand') : '';
+      if (brandName) payload.brand = await resolveNamed(Brand, brandName, nameCache);
+      const categoryId = await resolveCategory({
+        explicit: get('category'),
+        subcategory: get('subcategory'),
+        productName: name,
+        brandName,
+        cache: nameCache,
+        existing: existingCategories,
+        onCreate: () => { categoriesCreated += 1; },
+      });
+      if (categoryId) payload.category = categoryId;
       if (has('purchasePrice')) payload.purchasePrice = toNumber(get('purchasePrice'), 0);
       if (has('wholesalePrice') && get('wholesalePrice') !== '') payload.wholesalePrice = toNumber(get('wholesalePrice'));
       if (has('minStock')) payload.minStock = toNumber(get('minStock'), 5);
@@ -351,15 +462,31 @@ async function importRows(rawRows) {
       if (has('status')) payload.isActive = isActiveStatus(get('status'));
       if (has('model')) payload.model = get('model') || undefined;
       if (has('description')) payload.description = get('description') || undefined;
+      if (warehouseId) payload.warehouse = warehouseId;
+      if (supplierId) payload.supplier = supplierId;
+      if (defaultUnitId) payload.unit = defaultUnitId;
 
       const existing = await Product.findOne({ sku: new RegExp(`^${escapeRegex(sku)}$`, 'i') });
+      let saved;
       if (existing) {
+        const previousStock = existing.currentStock;
+        const previousCategory = existing.category;
         Object.assign(existing, payload);
-        await existing.save();
+        // Keep existing inventory unless the file includes a Stock column.
+        if (!has('currentStock')) existing.currentStock = previousStock;
+        if (!payload.category) existing.category = previousCategory;
+        saved = await existing.save();
         updated += 1;
       } else {
-        await Product.create(payload);
+        if (!has('currentStock')) payload.currentStock = 0;
+        saved = await Product.create(payload);
         created += 1;
+      }
+      const linkedCategory = saved?.category || payload.category;
+      if (linkedCategory && saved?._id) {
+        const key = String(linkedCategory);
+        if (!categoryLinks.has(key)) categoryLinks.set(key, []);
+        categoryLinks.get(key).push(saved._id);
       }
     } catch (error) {
       const message = error.code === 11000
@@ -369,7 +496,14 @@ async function importRows(rawRows) {
     }
   }
 
-  return { created, updated, skipped, errors };
+  await Promise.all([...categoryLinks.entries()].map(([catId, productIds]) => (
+    Category.updateOne(
+      { _id: catId },
+      { $addToSet: { relatedProducts: { $each: productIds } }, $set: { isActive: true } }
+    )
+  )));
+
+  return { created, updated, skipped, errors, categoriesCreated };
 }
 
 module.exports = {

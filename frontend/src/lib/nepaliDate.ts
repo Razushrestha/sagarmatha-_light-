@@ -51,18 +51,43 @@ export function isoFromParts(year: number, monthIndex: number, day: number): str
   return `${year}-${pad(monthIndex + 1)}-${pad(day)}`;
 }
 
-export function formatBsDate(value?: string | Date | null): string {
-  if (!value) return "";
+function bsParts(value?: string | Date | null): { year: number; month: number; date: number } | null {
+  if (!value) return null;
   try {
     const iso = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
       ? value
       : toLocalISODate(value);
-    if (!iso) return "";
+    if (!iso) return null;
     const [y, m, d] = iso.split("-").map(Number);
-    return new NepaliDate(new Date(y, m - 1, d)).format("YYYY/MM/DD");
+    const nd = new NepaliDate(new Date(y, m - 1, d));
+    const bs = nd.getBS();
+    return { year: bs.year, month: bs.month + 1, date: bs.date };
   } catch {
-    return "";
+    return null;
   }
+}
+
+export function formatBsDate(value?: string | Date | null): string {
+  const parts = bsParts(value);
+  if (!parts) return "";
+  return `${parts.year}/${pad(parts.month)}/${pad(parts.date)}`;
+}
+
+/** Busy/Tally-style BS date: 2083-04-08 */
+export function formatBsDash(value?: string | Date | null): string {
+  const parts = bsParts(value);
+  if (!parts) return "";
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.date)}`;
+}
+
+/** Ledger AD date: 7/24/2026 */
+export function formatAdSlash(value?: string | Date | null): string {
+  if (!value) return "";
+  const date = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00`)
+    : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
 }
 
 export function formatBsDateTime(value?: string | Date | null): string {

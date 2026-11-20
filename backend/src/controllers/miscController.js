@@ -114,8 +114,48 @@ exports.deleteBrand = async (req, res) => {
 };
 
 exports.getUnits = async (req, res) => {
+  const {
+    unitAllowedForIndustry,
+    sortUnitsForIndustry,
+  } = require('../services/tenantService');
+  const industry = req.tenant?.industry || 'hardware';
   const units = await Unit.find(scoped(req, { isActive: true })).lean();
-  res.json({ success: true, data: units });
+  const filtered = sortUnitsForIndustry(
+    units.filter((unit) => unitAllowedForIndustry(unit, industry)),
+    industry
+  );
+  res.json({ success: true, data: filtered });
+};
+
+exports.createUnit = async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    const shortName = String(req.body.shortName || req.body.symbol || '').trim() || name.slice(0, 6);
+    if (!name) return res.status(400).json({ success: false, message: 'Unit name is required.' });
+    const existing = await Unit.findOne(scoped(req, {
+      $or: [
+        { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        { shortName: new RegExp(`^${shortName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      ],
+    }));
+    if (existing) {
+      if (!existing.isActive) {
+        existing.isActive = true;
+        existing.name = name;
+        existing.shortName = shortName;
+        await existing.save();
+        return res.status(200).json({ success: true, data: existing });
+      }
+      return res.status(400).json({ success: false, message: 'A unit with this name already exists.' });
+    }
+    const unit = await Unit.create({ name, shortName, isActive: true });
+    res.status(201).json({ success: true, data: unit });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ success: false, message: 'A unit with this name already exists.' });
+    }
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
 
 exports.getWarehouses = async (req, res) => {

@@ -67,9 +67,10 @@ export const productAPI = {
     api.get("/products/export", { params: { format }, responseType: "blob" }),
   downloadTemplate: (format: "csv" | "xlsx") =>
     api.get("/products/import-template", { params: { format }, responseType: "blob" }),
-  importFile: (file: File) => {
+  importFile: (file: File, options?: { supplierId?: string }) => {
     const formData = new FormData();
     formData.append("file", file);
+    if (options?.supplierId) formData.append("supplierId", options.supplierId);
     return api.post("/products/import", formData, { timeout: 60000 });
   },
 };
@@ -112,6 +113,8 @@ export const cafeAPI = {
   getTables: () => api.get("/cafe/tables"),
   createTable: (data: object) => api.post("/cafe/tables", data),
   updateTable: (id: string, data: object) => api.put(`/cafe/tables/${id}`, data),
+  getTableBill: (id: string) => api.get(`/cafe/tables/${id}/bill`),
+  saveTableBill: (id: string, data: object) => api.put(`/cafe/tables/${id}/bill`, data),
   getPriceRules: () => api.get("/cafe/price-rules"),
   savePriceRule: (data: object) => api.post("/cafe/price-rules", data),
   updatePriceRule: (id: string, data: object) => api.put(`/cafe/price-rules/${id}`, data),
@@ -225,6 +228,7 @@ export const miscAPI = {
   updateBrand: (id: string, data: object) => api.put(`/brands/${id}`, data),
   deleteBrand: (id: string) => api.delete(`/brands/${id}`),
   getUnits: () => api.get("/units"),
+  createUnit: (data: { name: string; shortName?: string }) => api.post("/units", data),
   getWarehouses: () => api.get("/warehouses"),
   getStockMovements: (params?: Record<string, string>) => api.get("/stock-movements", { params }),
   getSettings: () => api.get("/settings"),

@@ -101,9 +101,12 @@ export default function ProductsPage() {
     setImporting(true);
     try {
       const res = await productAPI.importFile(file);
-      const { created, updated, errors } = res.data.data || {};
+      const { created, updated, errors, categoriesCreated } = res.data.data || {};
       if ((created || 0) + (updated || 0) > 0) {
-        toast.success(`Imported from your file: ${created || 0} new, ${updated || 0} updated`);
+        toast.success(
+          `Imported from your file: ${created || 0} new, ${updated || 0} updated` +
+            (categoriesCreated ? ` · ${categoriesCreated} categor${categoriesCreated === 1 ? "y" : "ies"} added` : "")
+        );
       }
       if (errors?.length) {
         const first = errors[0];
@@ -156,11 +159,31 @@ export default function ProductsPage() {
             />
             <button
               type="button"
+              disabled={!!exporting}
+              onClick={async () => {
+                setExporting("xlsx");
+                try {
+                  await saveBlob(productAPI.downloadTemplate("xlsx"), "product-import-template.xlsx");
+                  toast.success("Import template downloaded");
+                } catch {
+                  toast.error("Could not download template");
+                } finally {
+                  setExporting(null);
+                }
+              }}
+              className="btn-secondary flex items-center gap-2"
+              title="Download blank CSV/Excel template"
+            >
+              <Download className="w-4 h-4" /> Template
+            </button>
+            <button
+              type="button"
               disabled={importing}
               onClick={() => fileRef.current?.click()}
               className="btn-secondary flex items-center gap-2"
+              title="Upload CSV or Excel — stock goes into inventory"
             >
-              <Download className="w-4 h-4" /> {importing ? "Importing..." : "Import"}
+              <Upload className="w-4 h-4" /> {importing ? "Importing..." : "Import"}
             </button>
             <button
               type="button"

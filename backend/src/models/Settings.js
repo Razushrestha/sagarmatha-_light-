@@ -10,6 +10,7 @@ const settingsSchema = new mongoose.Schema({
   email: { type: String },
   pan: { type: String },
   vatNumber: { type: String, default: company.vatNumber },
+  vatEnabled: { type: Boolean, default: true },
   vatRate: { type: Number, default: 13 },
   vatInclusive: { type: Boolean, default: true },
   serviceChargePercent: { type: Number, default: 10, min: 0, max: 100 },

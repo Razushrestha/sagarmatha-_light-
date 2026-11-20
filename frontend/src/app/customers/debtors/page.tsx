@@ -9,6 +9,7 @@ import { FormField, SelectField } from "@/components/ui/FormField";
 import { FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { customerAPI } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
+import WhatsAppLedgerButton from "@/components/customers/WhatsAppLedgerButton";
 import { CreditCard, AlertCircle, Settings } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -64,10 +65,21 @@ export default function DebtorsPage() {
   const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
+    const payAmount = Number(amount);
+    if (!(payAmount > 0)) return toast.error("Enter a valid amount");
     setSaving(true);
     try {
-      await customerAPI.receivePayment(selected._id, { amount: Number(amount), method, reference });
-      toast.success("Payment recorded!");
+      const res = await customerAPI.receivePayment(selected._id, { amount: payAmount, method, reference });
+      const nextDebt = res.data?.customer?.debtAmount ?? res.data?.customer?.outstanding;
+      const nextCredit = res.data?.customer?.creditAmount ?? res.data?.customer?.creditBalance;
+      if (typeof nextDebt === "number") {
+        toast.success(
+          `Payment recorded. Debt now ${formatCurrency(nextDebt)}` +
+            (nextCredit > 0 ? ` · Credit ${formatCurrency(nextCredit)}` : "")
+        );
+      } else {
+        toast.success("Payment recorded!");
+      }
       setShowPay(false);
       setAmount("");
       setSelected(null);
@@ -116,10 +128,20 @@ export default function DebtorsPage() {
             ) : debtors.map((d) => (
               <tr key={d._id} className="hover:bg-brand-50/50">
                 <td className="table-cell">
-                  <p className="font-medium">{d.name}</p>
+                  <Link
+                    href={`/customers/${d._id}?from=debtors`}
+                    className="font-medium text-brand-800 hover:text-brand-950 hover:underline"
+                  >
+                    {d.name}
+                  </Link>
                   {d.company && <p className="text-xs text-brand-400">{d.company}</p>}
                 </td>
-                <td className="table-cell">{d.phone}</td>
+                <td className="table-cell">
+                  <div className="flex flex-col items-start">
+                    <span>{d.phone || "—"}</span>
+                    {d.phone ? <WhatsAppLedgerButton customerId={d._id} phone={d.phone} /> : null}
+                  </div>
+                </td>
                 <td className="table-cell capitalize">{d.customerType}</td>
                 <td className="table-cell">
                   <span className="flex items-center gap-1 text-brand-700 font-semibold">
@@ -141,7 +163,7 @@ export default function DebtorsPage() {
                       <CreditCard className="w-3.5 h-3.5" /> Collect
                     </button>
                     <Link
-                      href={`/customers/debtors/${d._id}`}
+                      href={`/customers/${d._id}?from=debtors`}
                       className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-900 border border-brand-200 rounded-lg px-3 py-1.5 hover:bg-brand-50"
                     >
                       <Settings className="w-3.5 h-3.5" /> Manage

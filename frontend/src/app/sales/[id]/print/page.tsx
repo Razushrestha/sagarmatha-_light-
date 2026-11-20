@@ -56,6 +56,8 @@ interface Settings {
   phone: string;
   pan: string;
   vatNumber: string;
+  vatEnabled?: boolean;
+  vatRate?: number;
   termsAndConditions?: string;
   footerText?: string;
 }
@@ -96,9 +98,10 @@ export default function InvoicePrintPage() {
 
   useEffect(() => {
     if (!sale || sale.type !== "estimate" || sale.status === "completed") return;
+    if (settings?.vatEnabled === false) return;
     setPayments([{ method: "cash", amount: sale.total }]);
     setShowConvert(true);
-  }, [sale]);
+  }, [sale, settings]);
 
   const startConvert = () => {
     if (!sale) return;
@@ -194,6 +197,8 @@ export default function InvoicePrintPage() {
 
   const taxableAmount = sale.total - sale.vatAmount;
   const isEstimate = sale.type === "estimate" && sale.status !== "completed";
+  const vatOn = settings.vatEnabled !== false;
+  const showVatOnBill = vatOn && Boolean(sale.isVatBill);
 
   return (
     <div className="min-h-screen bg-gray-100 py-8 print:bg-white print:py-0">
@@ -229,14 +234,14 @@ export default function InvoicePrintPage() {
           <Download className="w-4 h-4" />
           {downloading ? "Preparing..." : "Download a Copy"}
         </button>
-        {isEstimate && !showConvert && (
+        {isEstimate && vatOn && !showConvert && (
           <button onClick={startConvert} className="btn-accent flex items-center gap-2">
             <Receipt className="w-4 h-4" /> Convert to Bill
           </button>
         )}
       </div>
 
-      {isEstimate && showConvert && (
+      {isEstimate && vatOn && showConvert && (
         <div className="max-w-3xl mx-auto mb-4 px-4 print:hidden">
           <div className="bg-white border border-brand-200 rounded-xl p-5 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
@@ -331,7 +336,7 @@ export default function InvoicePrintPage() {
               <h1 className="text-2xl font-bold text-brand-900">{settings.companyName}</h1>
               <p className="text-sm text-gray-600 mt-1">{settings.address}</p>
               <p className="text-sm text-gray-600">Tel: {settings.phone}</p>
-              {settings.vatNumber && <p className="text-sm text-gray-600">VAT: {settings.vatNumber}</p>}
+              {showVatOnBill && settings.vatNumber && <p className="text-sm text-gray-600">VAT: {settings.vatNumber}</p>}
             </div>
             <div className="text-right">
               <div className="bg-brand-800 text-white px-4 py-2 rounded-lg">
@@ -435,11 +440,11 @@ export default function InvoicePrintPage() {
                 <span>{formatCurrency(sale.serviceChargeAmount || 0)}</span>
               </div>
             )}
-            <div className="flex justify-between"><span>Taxable Amount</span><span>{formatCurrency(taxableAmount)}</span></div>
-            {sale.isVatBill ? (
-              <div className="flex justify-between"><span>VAT (13%)</span><span>{formatCurrency(sale.vatAmount)}</span></div>
-            ) : (
-              <div className="flex justify-between text-gray-400"><span>VAT</span><span>Not applicable</span></div>
+            {showVatOnBill && (
+              <>
+                <div className="flex justify-between"><span>Taxable Amount</span><span>{formatCurrency(taxableAmount)}</span></div>
+                <div className="flex justify-between"><span>VAT ({settings.vatRate || 13}%)</span><span>{formatCurrency(sale.vatAmount)}</span></div>
+              </>
             )}
             <div className="flex justify-between font-bold text-lg border-t pt-2 text-brand-900">
               <span>Total (NPR)</span><span>{formatCurrency(sale.total)}</span>

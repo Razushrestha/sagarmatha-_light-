@@ -15,6 +15,7 @@ router.post('/brands', authorize('product:create'), miscController.createBrand);
 router.put('/brands/:id', authorize('product:edit', 'product:create'), miscController.updateBrand);
 router.delete('/brands/:id', authorize('product:delete', 'product:edit', 'product:create'), miscController.deleteBrand);
 router.get('/units', miscController.getUnits);
+router.post('/units', authorize('product:create'), miscController.createUnit);
 router.get('/warehouses', miscController.getWarehouses);
 router.get('/stock-movements', authorize('product:read', 'stock:adjust', 'pos:access'), miscController.getStockMovements);
 router.get('/settings', authorize('settings:manage', 'invoice:read', 'pos:access', 'reports:view', 'product:read'), miscController.getSettings);

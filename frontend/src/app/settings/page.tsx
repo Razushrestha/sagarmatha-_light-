@@ -20,6 +20,7 @@ interface Settings {
   email: string;
   pan: string;
   vatNumber: string;
+  vatEnabled?: boolean;
   vatRate: number;
   serviceChargePercent?: number;
   loyaltyStampsNeeded?: number;
@@ -218,10 +219,24 @@ export default function SettingsPage() {
 
         <FormCard>
           <FormSection title="Tax & Invoice Settings">
+            <div className="mb-4">
+              <FormCheckbox
+                id="vatEnabled"
+                label="Enable VAT on sales and bills"
+                checked={settings.vatEnabled !== false}
+                onChange={(v) => update("vatEnabled", v)}
+              />
+              <p className="text-xs text-brand-500 mt-1">
+                When on, checkout shows taxable amount and VAT, and you can issue a VAT bill or an estimate.
+                When off, those lines are hidden and only estimate bills are issued.
+              </p>
+            </div>
             <FormGrid cols={2}>
+              {settings.vatEnabled !== false && (
               <FormField label="VAT Rate (%)">
                 <input type="number" className="input-field" value={settings.vatRate} onChange={(e) => update("vatRate", Number(e.target.value))} />
               </FormField>
+              )}
               {recipesOn && (
                 <FormField label="Dine-in service charge (%)">
                   <input type="number" className="input-field" value={settings.serviceChargePercent ?? 10} onChange={(e) => update("serviceChargePercent", Number(e.target.value))} />
@@ -239,9 +254,11 @@ export default function SettingsPage() {
                 <input className="input-field" value={settings.invoicePrefix} onChange={(e) => update("invoicePrefix", e.target.value)} />
               </FormField>
             </FormGrid>
+            {settings.vatEnabled !== false && (
             <div className="mt-3">
               <FormCheckbox id="vatInclusive" label="VAT inclusive pricing (Nepal 13%)" checked={settings.vatInclusive} onChange={(v) => update("vatInclusive", v)} />
             </div>
+            )}
             <div className="mt-4">
               <FormField label="Date type">
                 <div className="flex rounded-lg border border-brand-200 overflow-hidden">

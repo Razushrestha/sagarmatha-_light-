@@ -305,10 +305,14 @@ exports.updateTenant = async (req, res) => {
     if (plan && ['starter', 'business', 'enterprise'].includes(plan)) tenant.plan = plan;
     if (industry) {
       const { normalizeIndustry, modulesFor } = require('../config/industry');
+      const { syncTenantUnits } = require('../services/tenantService');
+      const { runWithTenant } = require('../utils/tenantContext');
       const nextIndustry = normalizeIndustry(industry);
       if (nextIndustry !== tenant.industry) {
         tenant.industry = nextIndustry;
         tenant.modules = modulesFor(nextIndustry);
+        await tenant.save();
+        await runWithTenant(tenant._id, () => syncTenantUnits(nextIndustry));
       }
     }
     if (STORAGE_OPTIONS_GB.includes(Number(storageGb))) tenant.storageGb = Number(storageGb);

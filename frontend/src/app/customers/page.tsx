@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/ui/PageHeader";
 import Modal from "@/components/ui/Modal";
@@ -10,6 +11,7 @@ import { FormGrid, FormActions } from "@/components/ui/FormLayout";
 import { customerAPI } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import WhatsAppLedgerButton from "@/components/customers/WhatsAppLedgerButton";
 import { Plus, Search, Users, Pencil, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -239,11 +241,21 @@ export default function CustomersPage() {
                   <tr key={c._id} className="hover:bg-brand-50/50 transition-colors">
                     <td className="table-cell">
                       <div>
-                        <p className="font-medium text-gray-800">{c.name}</p>
+                        <Link
+                          href={`/customers/${c._id}?from=list`}
+                          className="font-medium text-brand-800 hover:text-brand-950 hover:underline"
+                        >
+                          {c.name}
+                        </Link>
                         {c.company && <p className="text-xs text-gray-400">{c.company}</p>}
                       </div>
                     </td>
-                    <td className="table-cell">{c.phone}</td>
+                    <td className="table-cell">
+                      <div className="flex flex-col items-start">
+                        <span>{c.phone || "—"}</span>
+                        {c.phone ? <WhatsAppLedgerButton customerId={c._id} phone={c.phone} /> : null}
+                      </div>
+                    </td>
                     <td className="table-cell">
                       <span className="badge bg-brand-100 text-brand-700 capitalize">{c.customerType}</span>
                     </td>

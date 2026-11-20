@@ -255,11 +255,13 @@ export default function POSPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [savingCustomer, setSavingCustomer] = useState(false);
   const [includeVat, setIncludeVat] = useState(true);
+  const [vatEnabled, setVatEnabled] = useState(true);
   const [serviceChargePercent, setServiceChargePercent] = useState(10);
   const [vatRate, setVatRate] = useState(13);
   const [openShift, setOpenShift] = useState<{ _id: string; openingFloat?: number; live?: { expectedCash?: number } } | null>(null);
   const [tables, setTables] = useState<Array<{ _id: string; name: string; status: string }>>([]);
   const [tableId, setTableId] = useState("");
+  const [heldResumeId, setHeldResumeId] = useState<string | null>(null);
   const [happyHour, setHappyHour] = useState<{ percentOff?: number; name?: string } | null>(null);
   const [folios, setFolios] = useState<Array<{ _id: string; guestName: string; balance: number }>>([]);
   const [folioId, setFolioId] = useState("");
@@ -271,7 +273,10 @@ export default function POSPage() {
 
   useEffect(() => {
     const draft = loadPosDraft();
-    if (draft) {
+    const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const resumeHeld = params?.get("held");
+    const resumeTable = params?.get("table");
+    if (draft && !resumeHeld) {
       setCart(draft.cart || []);
       setElectricianId(draft.electricianId || "");
       if (draft.warehouseId) setWarehouseId(draft.warehouseId);
@@ -281,8 +286,67 @@ export default function POSPage() {
       if (draft.selectedPaymentMethod) setSelectedPaymentMethod(draft.selectedPaymentMethod);
       setSelectedCustomer(draft.selectedCustomer || null);
     }
+    if (resumeTable) setTableId(resumeTable);
     setDraftReady(true);
   }, []);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const heldId = params?.get("held");
+    if (!heldId) return;
+    let cancelled = false;
+    saleAPI.getById(heldId).then((res) => {
+      if (cancelled) return;
+      const sale = res.data.data;
+      if (!sale?.isHeld) return toast.error("That table bill is no longer open");
+      const nextCart: CartItem[] = (sale.items || []).map((item: {
+        product?: string | { _id: string };
+        productName: string;
+        sku?: string;
+        quantity: number;
+        unitPrice: number;
+        discount?: number;
+        modifiers?: TicketModifier[];
+        complimentary?: boolean;
+        compReason?: string;
+        costPrice?: number;
+      }) => {
+        const productId = typeof item.product === "string" ? item.product : item.product?._id || "";
+        const product = {
+          _id: productId || `temp-${item.productName}`,
+          name: item.productName,
+          sku: item.sku || "",
+          sellingPrice: Number(item.unitPrice) || 0,
+          purchasePrice: Number(item.costPrice) || 0,
+          currentStock: 9999,
+          minStock: 0,
+          vatInclusive: true,
+          vatRate: 13,
+        } as Product;
+        return {
+          product,
+          quantity: Number(item.quantity) || 1,
+          unitPrice: Number(item.unitPrice) || 0,
+          discount: Number(item.discount) || 0,
+          modifiers: item.modifiers,
+          complimentary: item.complimentary,
+          compReason: item.compReason,
+        };
+      });
+      setCart(nextCart);
+      setHeldResumeId(sale._id);
+      if (sale.table) setTableId(String(sale.table._id || sale.table));
+      if (sale.warehouse) setWarehouseId(String(sale.warehouse._id || sale.warehouse));
+      if (typeof sale.isVatBill === "boolean") setIncludeVat(sale.isVatBill);
+      if (sale.serviceType === "takeaway" || sale.serviceType === "dine_in") setServiceType(sale.serviceType);
+      if (sale.discount) setInvoiceDiscount(Number(sale.discount) || 0);
+      setShowCart(true);
+      toast.success(`Loaded ${sale.invoiceNumber}`);
+      router.replace("/pos");
+    }).catch(() => toast.error("Could not load table bill"));
+    return () => { cancelled = true; };
+  }, [draftReady, router]);
 
   useEffect(() => {
     if (!draftReady) return;
@@ -323,6 +387,9 @@ export default function POSPage() {
       const data = r.data.data || {};
       if (Number.isFinite(Number(data.serviceChargePercent))) setServiceChargePercent(Number(data.serviceChargePercent));
       if (Number.isFinite(Number(data.vatRate))) setVatRate(Number(data.vatRate));
+      const enabled = data.vatEnabled !== false;
+      setVatEnabled(enabled);
+      if (!enabled) setIncludeVat(false);
     }).catch(() => {});
   }, []);
 
@@ -518,13 +585,13 @@ export default function POSPage() {
       food: foodAfterDiscount,
       serviceChargePercent,
       vatRate,
-      includeVat,
+      includeVat: vatEnabled && includeVat,
       serviceType,
     })
     : null;
   const taxableAmount = cafeBill ? cafeBill.taxable : foodAfterDiscount;
   const serviceChargeAmount = cafeBill?.serviceCharge || 0;
-  const vatAmount = cafeBill ? cafeBill.vatAmount : (includeVat ? foodAfterDiscount * 0.13 : 0);
+  const vatAmount = cafeBill ? cafeBill.vatAmount : (vatEnabled && includeVat ? foodAfterDiscount * (vatRate / 100) : 0);
   const total = cafeBill ? cafeBill.total : foodAfterDiscount + vatAmount;
   const invoiceDiscountFactor = subtotal > 0 ? foodAfterDiscount / subtotal : 1;
   const cashPaidTotal = payments.filter((p) => p.method !== "credit").reduce((s, p) => s + (p.amount || 0), 0);
@@ -558,7 +625,8 @@ export default function POSPage() {
   }, [payingNow, total]);
 
   const buildSalePayload = (billType: BillMode, isHeld = false, paymentLines?: PaymentLine[]) => {
-    const isEstimate = billType === "estimate";
+    const isEstimate = !vatEnabled || billType === "estimate";
+    const applyVat = vatEnabled && includeVat && !isEstimate;
     const activePayments = paymentLines ?? payments;
     const cashPaid = activePayments.filter((p) => p.method !== "credit").reduce((s, p) => s + (p.amount || 0), 0);
     const dueAmount = Math.max(0, total - cashPaid);
@@ -585,8 +653,8 @@ export default function POSPage() {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           discount: item.discount,
-          vatRate: includeVat ? 13 : 0,
-          vatAmount: includeVat ? lineTaxable * 0.13 : 0,
+          vatRate: applyVat ? vatRate : 0,
+          vatAmount: applyVat ? lineTaxable * (vatRate / 100) : 0,
           subtotal: lineSubtotal,
           costPrice: item.unitPrice * 0.7,
           categoryName,
@@ -604,13 +672,13 @@ export default function POSPage() {
       serviceChargeAmount: recipesOn ? serviceChargeAmount : undefined,
       discount: invoiceDiscount,
       discountType: "percent",
-      vatAmount: includeVat ? vatAmount : 0,
+      vatAmount: applyVat ? vatAmount : 0,
       total,
       amountPaid: isHeld ? 0 : cashPaid,
       amountDue: isHeld ? total : dueAmount,
       payments: isHeld ? [] : activePayments.filter((p) => p.amount > 0),
       changeAmount: isHeld ? 0 : change,
-      isVatBill: !isEstimate && includeVat,
+      isVatBill: !isEstimate && applyVat,
       warehouse: warehouseId,
       notes: coverageNote || undefined,
       serviceType: recipesOn ? serviceType : undefined,
@@ -621,7 +689,8 @@ export default function POSPage() {
 
   const resetCart = () => {
     setCart([]); setSelectedCustomer(null); setInvoiceDiscount(0); setElectricianId("");
-    setPayments([{ method: "cash", amount: 0 }]); setShowPayment(false); setBillMode(null); setIncludeVat(true); setSelectedPaymentMethod("cash"); setPayingNow(0);
+    setPayments([{ method: "cash", amount: 0 }]); setShowPayment(false); setBillMode(null); setIncludeVat(vatEnabled); setSelectedPaymentMethod("cash"); setPayingNow(0);
+    setHeldResumeId(null);
     setCustomerPanel(null); setNewCustomer(emptyNewCustomer());
     setRelatedItems([]); setCoverageNote(""); setServiceType("dine_in"); setTableId(""); setFolioId("");
     setCustomerSearch(""); setSearchResults([]);
@@ -730,7 +799,10 @@ export default function POSPage() {
     setPayments(checkoutPayments);
     setLoading(true);
     try {
-      const res = await saleAPI.create(buildSalePayload(billMode, false, checkoutPayments));
+      const payload = buildSalePayload(billMode, false, checkoutPayments);
+      const res = heldResumeId
+        ? await saleAPI.completeHeld(heldResumeId, payload)
+        : await saleAPI.create(payload);
       const doc = res.data.data;
       if (billMode === "estimate") {
         toast.success(`Estimate ${doc.invoiceNumber} created!`);
@@ -854,7 +926,7 @@ export default function POSPage() {
               ))}
             </div>
           )}
-          <div className={cn("relative", recipesOn ? "w-40 shrink-0" : "flex-1")}>
+          <div className="relative flex-1 min-w-[10rem]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input type="text" value={search} onChange={(e) => {
               const value = e.target.value;
@@ -863,7 +935,7 @@ export default function POSPage() {
               productSearchTimer.current = setTimeout(() => loadProducts(value, selectedCategory, selectedBrand), 200);
             }}
               onKeyDown={(e) => e.key === "Enter" && handleBarcodeScan(search)}
-              placeholder={recipesOn ? "Find drink…" : "Search products, brand, or scan barcode..."} className="input-field pl-10" />
+              placeholder={recipesOn ? "Search menu…" : "Search products, brand, or scan barcode..."} className="input-field pl-10" />
           </div>
           {recipesOn && (
             <button type="button" onClick={() => setShowWaste(true)} className="btn-secondary flex items-center gap-2 shrink-0">
@@ -989,21 +1061,6 @@ export default function POSPage() {
         })()}
 
         <div className="flex-1 overflow-y-auto pr-1">
-            {recipesOn && !selectedCategory && !search.trim() ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                {categories.map((cat) => (
-                  <button
-                    key={cat._id}
-                    type="button"
-                    onClick={() => handleCategoryChange(cat._id)}
-                    className="card p-6 text-left hover:border-brand-300 hover:shadow-md min-h-[120px]"
-                  >
-                    <p className="text-lg font-semibold text-brand-900">{cat.name}</p>
-                    <p className="text-xs text-brand-400 mt-2">Open category</p>
-                  </button>
-                ))}
-              </div>
-            ) : (
             <div className={cn("grid gap-4", recipesOn ? "grid-cols-2 md:grid-cols-3 xl:grid-cols-4" : "grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5")}>
               {products.map((p) => {
                 const inCart = getCartQty(p._id);
@@ -1118,12 +1175,12 @@ export default function POSPage() {
                 );
               })}
             </div>
-            )}
 
-            {products.length === 0 && !(recipesOn && !selectedCategory && !search.trim()) && (
+            {products.length === 0 && (
               <div className="flex flex-col items-center justify-center h-48 text-brand-400">
                 <Package className="w-10 h-10 mb-2 opacity-50" />
                 <p className="text-sm">No products found</p>
+                <p className="text-xs mt-1 text-brand-400">Add products in Inventory, or clear category/search filters.</p>
               </div>
             )}
         </div>
@@ -1136,7 +1193,7 @@ export default function POSPage() {
             <p className="text-sm">No products added yet</p>
           </div>
         ) : (
-          <div className="space-y-5">
+          <div className="flex flex-col space-y-5">
             <div className={cn(
               "hidden sm:grid gap-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-brand-400",
               partnersOn
@@ -1303,7 +1360,10 @@ export default function POSPage() {
               })}
             </div>
 
-            <div className="border-t border-brand-100 pt-4 space-y-2.5 bg-white rounded-xl">
+            <div className={cn(
+              "border-t border-brand-100 pt-4 space-y-2.5 bg-white rounded-xl",
+              recipesOn ? "order-4" : "order-2"
+            )}>
               <div className="flex justify-between text-sm">
                 <span className="text-brand-500">Items</span>
                 <span className="font-medium">{cartItemCount}</span>
@@ -1328,13 +1388,16 @@ export default function POSPage() {
                   <span>{formatCurrency(serviceChargeAmount)}</span>
                 </div>
               )}
+              {vatEnabled && (
               <div className="flex justify-between text-sm">
                 <span className="text-brand-500">Taxable Amount</span>
                 <span>{formatCurrency(taxableAmount)}</span>
               </div>
+              )}
+              {vatEnabled && (
               <div className="flex justify-between text-sm items-center gap-3">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-brand-500 shrink-0">VAT (13%)</span>
+                  <span className="text-brand-500 shrink-0">VAT ({vatRate}%)</span>
                   <div className="flex rounded-md border border-brand-200 overflow-hidden text-[11px] font-medium shrink-0">
                     <button
                       type="button"
@@ -1362,6 +1425,7 @@ export default function POSPage() {
                   {formatCurrency(vatAmount)}
                 </span>
               </div>
+              )}
               <div className="flex justify-between text-lg font-bold text-brand-900 pt-3 border-t border-brand-100">
                 <span>Total</span>
                 <span>{formatCurrency(total)}</span>
@@ -1377,7 +1441,10 @@ export default function POSPage() {
               )}
             </div>
 
-            <div className="p-4 border border-brand-100 rounded-xl bg-white space-y-3">
+            <div className={cn(
+              "p-4 border border-brand-100 rounded-xl bg-white space-y-3",
+              recipesOn ? "order-2" : "order-3"
+            )}>
               <div className="flex items-center justify-between gap-3 pb-3 border-b border-brand-100">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-brand-500">Warehouse</p>
@@ -1608,7 +1675,10 @@ export default function POSPage() {
               )}
             </div>
 
-            <div className="p-4 border border-brand-100 rounded-xl bg-white space-y-3">
+            <div className={cn(
+              "p-4 border border-brand-100 rounded-xl bg-white space-y-3",
+              recipesOn ? "order-3" : "order-4"
+            )}>
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-500">Payment Method</p>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 {CART_PAYMENT_METHODS.map((method) => (
@@ -1671,29 +1741,34 @@ export default function POSPage() {
             </div>
 
             {!showPayment ? (
-              <div className="grid grid-cols-2 gap-2">
+              <div className={cn("order-5 grid gap-2", vatEnabled ? "grid-cols-2" : "grid-cols-1")}>
+                {vatEnabled && (
                 <button
                   type="button"
                   onClick={startVatBill}
                   disabled={!cart.length || loading}
                   className="btn-primary flex items-center justify-center gap-2 py-2.5 text-sm"
                 >
-                  <Receipt className="w-4 h-4" /> VAT Bill
+                  <Receipt className="w-4 h-4" /> {recipesOn ? "Bill" : "VAT Bill"}
                 </button>
+                )}
                 <button
                   type="button"
                   onClick={startEstimateBill}
                   disabled={!cart.length || loading}
-                  className="btn-secondary flex items-center justify-center gap-2 py-2.5 text-sm"
+                  className={cn(
+                    "flex items-center justify-center gap-2 py-2.5 text-sm",
+                    vatEnabled ? "btn-secondary" : "btn-primary"
+                  )}
                 >
-                  <FileText className="w-4 h-4" /> Estimate Bill
+                  <FileText className="w-4 h-4" /> {recipesOn ? "Hold / Estimate" : "Estimate Bill"}
                 </button>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="order-5 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-brand-900">
-                    {billMode === "estimate" ? "Estimate Bill" : "VAT Bill"}: Payment
+                    {billMode === "estimate" ? (recipesOn ? "Hold / Estimate" : "Estimate Bill") : (recipesOn ? "Bill" : "VAT Bill")}: Payment
                   </p>
                   <span className="text-sm font-bold text-brand-800">{formatCurrency(total)}</span>
                 </div>
@@ -1789,7 +1864,16 @@ export default function POSPage() {
                 </div>
                 <div className="text-right">
                   <p className="font-bold text-brand-700">{formatCurrency(h.total)}</p>
-                  <button onClick={() => toast("Open POS and re-add items, or complete via sales list")} className="text-xs text-brand-600">View</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHeld(false);
+                      router.push(`/pos?held=${h._id}`);
+                    }}
+                    className="text-xs text-brand-600 hover:underline"
+                  >
+                    Resume
+                  </button>
                 </div>
               </div>
             ))}

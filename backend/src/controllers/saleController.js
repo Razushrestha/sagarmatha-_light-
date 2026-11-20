@@ -48,18 +48,35 @@ function saleId(value) {
   return String(value._id || value);
 }
 
+function vatIsEnabled(settings) {
+  return settings?.vatEnabled !== false;
+}
+
+async function applyVatPolicy(body) {
+  const settings = await Settings.findOne().select('vatEnabled vatRate').lean();
+  if (vatIsEnabled(settings)) return settings;
+  if (body.type !== 'quotation') body.type = 'estimate';
+  body.isVatBill = false;
+  body.vatAmount = 0;
+  if (Array.isArray(body.items)) {
+    body.items = body.items.map((item) => ({ ...item, vatRate: 0, vatAmount: 0 }));
+  }
+  return settings;
+}
+
 async function applyCafeTotals(req, body) {
   if (!hasModule(req.tenant, 'recipes')) return;
-  const settings = await Settings.findOne().select('serviceChargePercent vatRate').lean();
+  const settings = await Settings.findOne().select('serviceChargePercent vatRate vatEnabled').lean();
   const scPercent = Number(settings?.serviceChargePercent);
-  const vatRate = Number(settings?.vatRate);
+  const vatOn = vatIsEnabled(settings);
+  const vatRate = vatOn ? Number(settings?.vatRate) : 0;
   const serviceType = body.serviceType === 'takeaway' ? 'takeaway' : 'dine_in';
   body.serviceType = serviceType;
   const bill = cafeBillTotals({
     food: Number(body.subtotal) || 0,
     serviceChargePercent: Number.isFinite(scPercent) ? scPercent : 10,
     vatRate: Number.isFinite(vatRate) ? vatRate : 13,
-    includeVat: body.isVatBill !== false,
+    includeVat: vatOn && body.isVatBill !== false,
     serviceType,
   });
   body.serviceChargePercent = serviceType === 'takeaway' ? 0 : (Number.isFinite(scPercent) ? scPercent : 10);
@@ -199,6 +216,7 @@ exports.getSale = async (req, res) => {
 
 exports.createSale = async (req, res) => {
   try {
+    await applyVatPolicy(req.body);
     const type = req.body.type || 'invoice';
     if (type === 'quotation' && !hasModule(req.tenant, 'quotations')) {
       return res.status(404).json({ success: false, message: 'Not available for this shop.' });
@@ -506,6 +524,7 @@ exports.completeHeldSale = async (req, res) => {
     const sale = await Sale.findOne(scoped(req, { _id: req.params.id }));
     if (!sale || !sale.isHeld) return res.status(404).json({ success: false, message: 'Held sale not found.' });
 
+    await applyVatPolicy(req.body);
     await applyCommissionToSaleBody(req.body);
     if (Array.isArray(req.body.items)) req.body.items = await stampTintedItems(req.body.items);
     if (hasModule(req.tenant, 'recipes') && Array.isArray(req.body.items)) {
@@ -541,6 +560,10 @@ exports.convertToSale = async (req, res) => {
     if (!source) return res.status(404).json({ success: false, message: 'Document not found.' });
     if (!['quotation', 'estimate'].includes(source.type)) {
       return res.status(400).json({ success: false, message: 'Only quotations or estimates can be converted.' });
+    }
+    const vatSettings = await Settings.findOne().select('vatEnabled').lean();
+    if (!vatIsEnabled(vatSettings)) {
+      return res.status(400).json({ success: false, message: 'VAT is disabled in settings. Estimates cannot be converted to a VAT bill.' });
     }
     if (source.type === 'quotation' && !hasModule(req.tenant, 'quotations')) {
       return res.status(404).json({ success: false, message: 'Not available for this shop.' });

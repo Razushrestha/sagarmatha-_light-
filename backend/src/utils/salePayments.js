@@ -59,8 +59,22 @@ function creditFromBuckets(openingCredit, cashOnInvoices, buckets) {
   const refunds = buckets.refund || 0;
   const storeCreditLeft = Math.max(0, storeCredits - refunds);
   const refundsLeft = Math.max(0, refunds - storeCredits);
+  // Payments already applied onto invoices are reflected in cashOnInvoices.
+  // Only the leftover (and store/opening credit) is true customer credit.
   const invoiceOverpay = Math.max(0, payments - refundsLeft - cashOnInvoices);
-  return openingCredit + invoiceOverpay + storeCreditLeft;
+  return Math.max(0, openingCredit + invoiceOverpay + storeCreditLeft);
+}
+
+/** Apply available credit against receivable so debt and credit are never both owed. */
+function netDebtAndCredit(rawDebt, rawCredit) {
+  const debt = Math.max(0, Number(rawDebt) || 0);
+  const credit = Math.max(0, Number(rawCredit) || 0);
+  const offset = Math.min(debt, credit);
+  return {
+    outstanding: Math.round((debt - offset) * 100) / 100,
+    creditBalance: Math.round((credit - offset) * 100) / 100,
+    offset: Math.round(offset * 100) / 100,
+  };
 }
 
 async function repairCreditSales(Sale) {
@@ -154,23 +168,26 @@ async function reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, cus
 
   const openingDebt = Math.max(0, customer.openingDebt ?? Math.max(0, customer.openingBalance || 0));
   const openingCredit = Math.max(0, customer.openingCredit ?? Math.max(0, -(customer.openingBalance || 0)));
-  const targetDebt = openingDebt + totalDue;
+  const rawDebt = openingDebt + totalDue;
   const cashOnInvoices = Math.max(0, totalPurchases - totalDue);
   const buckets = await sumCustomerPaymentBuckets(CustomerPayment, customer._id);
-  const targetCredit = creditFromBuckets(openingCredit, cashOnInvoices, buckets);
-  const targetPaid = cashOnInvoices;
+  const rawCredit = creditFromBuckets(openingCredit, cashOnInvoices, buckets);
+  // Unapplied collections / store credit must reduce debt instead of sitting beside it.
+  const { outstanding, creditBalance } = netDebtAndCredit(rawDebt, rawCredit);
 
   await Customer.updateOne(
     { _id: customer._id },
     {
       $set: {
         totalPurchases,
-        totalPaid: targetPaid,
-        outstanding: targetDebt,
-        creditBalance: targetCredit,
+        totalPaid: cashOnInvoices,
+        outstanding,
+        creditBalance,
       },
     }
   );
+
+  return { outstanding, creditBalance, totalPurchases, totalDue, openingDebt };
 }
 
 async function reconcileAllCustomers(Customer, Sale, CustomerPayment) {
@@ -279,4 +296,7 @@ module.exports = {
   sumCustomerPayments,
   recordStoreCredit,
   ensureSaleReturnStoreCredits,
+  creditFromBuckets,
+  netDebtAndCredit,
+  sumPayments,
 };

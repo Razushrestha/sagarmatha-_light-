@@ -15,6 +15,8 @@ router.post('/waste', authorize('pos:access', 'stock:adjust', 'product:edit'), c
 router.get('/tables', requireModule('tables'), authorize('pos:access', 'invoice:read'), cafeController.listTables);
 router.post('/tables', requireModule('tables'), authorize('settings:manage', 'product:create'), cafeController.createTable);
 router.put('/tables/:id', requireModule('tables'), authorize('settings:manage', 'product:edit'), cafeController.updateTable);
+router.get('/tables/:id/bill', requireModule('tables'), authorize('pos:access', 'invoice:read'), cafeController.getTableBill);
+router.put('/tables/:id/bill', requireModule('tables'), authorize('pos:access', 'invoice:create', 'invoice:edit'), cafeController.saveTableBill);
 
 router.get('/price-rules', authorize('pos:access', 'settings:manage', 'product:read'), cafeController.listPriceRules);
 router.post('/price-rules', authorize('settings:manage'), cafeController.savePriceRule);

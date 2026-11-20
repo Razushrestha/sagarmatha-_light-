@@ -122,6 +122,8 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen = fals
   };
 
   const partnerLabel = user?.partnerLabel?.plural || "Partners";
+  const industry = user?.industry || "hardware";
+  const billingLast = industry === "cafe" || industry === "hotel";
   const filteredNav = navigation
     .filter((item) => {
       const perms = item.permissions || (item.permission ? [item.permission] : []);
@@ -130,6 +132,18 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen = fals
     })
     .filter((item) => !item.module || hasModule(item.module as keyof ShopModules))
     .map((item) => (item.partnerItem ? { ...item, name: partnerLabel } : item));
+
+  // Cafe/hotel: keep POS & sales list near the end (after floor ops), unlike hardware.
+  if (billingLast) {
+    const billingHrefs = new Set(["/pos", "/sales"]);
+    const billing = filteredNav.filter((item) => item.href && billingHrefs.has(item.href));
+    const rest = filteredNav.filter((item) => !(item.href && billingHrefs.has(item.href)));
+    const insertAt = rest.findIndex(
+      (item) => item.href === "/settings" || item.href === "/notifications" || item.href === "/audit"
+    );
+    const at = insertAt < 0 ? rest.length : insertAt;
+    filteredNav.splice(0, filteredNav.length, ...rest.slice(0, at), ...billing, ...rest.slice(at));
+  }
 
   const hideLabels = collapsed && !mobileOpen;
 

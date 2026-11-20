@@ -5,7 +5,6 @@ const { createAuditLog } = require('../middleware/audit');
 const SaleReturn = require('../models/SaleReturn');
 const {
   reconcileCustomerOutstanding,
-  normalizeSalePaymentFields,
   ensureSaleReturnStoreCredits,
 } = require('../utils/salePayments');
 const { scoped, scopedMatch, parsePaging, mustBelongToShop } = require('../utils/tenantQuery');
@@ -140,7 +139,20 @@ exports.deleteCustomer = async (req, res) => {
 
 exports.getDebtors = async (req, res) => {
   try {
-    const debtors = await Customer.find(scoped(req, { isActive: true, outstanding: { $gt: 0 } }))
+    // Recompute balances before listing so collections / store credit reduce debt immediately.
+    const needsSync = await Customer.find(scoped(req, {
+      isActive: true,
+      $or: [
+        { outstanding: { $gt: 0 } },
+        { creditBalance: { $gt: 0 } },
+        { openingDebt: { $gt: 0 } },
+      ],
+    })).select('_id').limit(200).lean();
+    for (const row of needsSync) {
+      await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, row._id);
+    }
+
+    let debtors = await Customer.find(scoped(req, { isActive: true, outstanding: { $gt: 0 } }))
       .select('name phone company customerType outstanding creditBalance creditLimit totalPurchases totalPaid')
       .sort({ outstanding: -1 })
       .limit(200)
@@ -156,12 +168,11 @@ exports.getDebtors = async (req, res) => {
         for (const row of unpaid) {
           await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, row._id);
         }
-        const retried = await Customer.find(scoped(req, { isActive: true, outstanding: { $gt: 0 } }))
+        debtors = await Customer.find(scoped(req, { isActive: true, outstanding: { $gt: 0 } }))
           .select('name phone company customerType outstanding creditBalance creditLimit totalPurchases totalPaid')
           .sort({ outstanding: -1 })
           .limit(200)
           .lean();
-        return res.json({ success: true, data: retried.map(mapDebtor) });
       }
     }
 
@@ -170,7 +181,6 @@ exports.getDebtors = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 exports.getCreditCustomers = async (req, res) => {
   try {
     await ensureSaleReturnStoreCredits(CustomerPayment, SaleReturn, Sale);
@@ -208,68 +218,106 @@ exports.getCustomerLedger = async (req, res) => {
   }
 };
 
+function applyCashToSale(sale, method, amount, reference) {
+  const { sumPayments } = require('../utils/salePayments');
+  const dueBefore = Math.max(0, Number(sale.amountDue) || 0);
+  const applied = Math.min(Math.max(0, Number(amount) || 0), dueBefore);
+  if (applied <= 0.009) return 0;
+
+  const payments = Array.isArray(sale.payments) ? [...sale.payments] : [];
+  payments.push({ method, amount: applied, reference });
+
+  // Keep a single credit marker for whatever is still unpaid after cash.
+  const nonCredit = payments.filter((p) => p.method !== 'credit');
+  const cashPaid = sumPayments(nonCredit, { excludeCredit: true });
+  const safeTotal = Number(sale.total) || 0;
+  const amountPaid = Math.min(safeTotal, cashPaid);
+  const amountDue = Math.max(0, safeTotal - amountPaid);
+  sale.payments = amountDue > 0.009
+    ? [...nonCredit, { method: 'credit', amount: amountDue }]
+    : nonCredit;
+  sale.amountPaid = amountPaid;
+  sale.amountDue = amountDue;
+  return applied;
+}
+
 exports.receivePayment = async (req, res) => {
   try {
     const { amount, method, reference, saleId, notes } = req.body;
     const customer = await Customer.findById(req.params.id);
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found.' });
-    if (amount <= 0) return res.status(400).json({ success: false, message: 'Invalid amount.' });
+    const payAmount = Math.round((Number(amount) || 0) * 100) / 100;
+    if (payAmount <= 0) return res.status(400).json({ success: false, message: 'Invalid amount.' });
+
+    // Refresh balances before applying so we never collect more than true net debt by accident.
+    await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customer._id);
+    const fresh = await Customer.findById(customer._id);
+    const netDebt = Math.max(0, Number(fresh?.outstanding) || 0);
 
     const payment = await CustomerPayment.create({
       customer: customer._id,
-      sale: saleId,
-      amount,
+      sale: saleId || undefined,
+      amount: payAmount,
       type: 'payment',
-      method,
+      method: method || 'cash',
       reference,
       notes,
       createdBy: req.user._id,
     });
 
-    let remaining = amount;
+    let remaining = payAmount;
+    const skipSaleId = saleId ? String(saleId) : null;
 
     if (saleId) {
       const sale = await Sale.findById(saleId);
-      if (sale) {
-        const applied = Math.min(remaining, sale.amountDue);
-        sale.payments.push({ method, amount: applied, reference });
-        const normalized = normalizeSalePaymentFields(sale.total, sale.payments);
-        sale.amountPaid = normalized.amountPaid;
-        sale.amountDue = normalized.amountDue;
-        await sale.save();
-        remaining -= applied;
+      if (sale && String(sale.customer) === String(customer._id)) {
+        const applied = applyCashToSale(sale, method || 'cash', remaining, reference);
+        if (applied > 0) {
+          await sale.save();
+          remaining = Math.round((remaining - applied) * 100) / 100;
+        }
       }
     }
 
-    if (remaining > 0) {
+    if (remaining > 0.009) {
       const unpaidSales = await Sale.find({
         customer: customer._id,
         type: { $in: ['invoice', 'estimate'] },
+        status: { $nin: ['cancelled', 'draft'] },
+        isHeld: { $ne: true },
         amountDue: { $gt: 0 },
+        ...(skipSaleId ? { _id: { $ne: skipSaleId } } : {}),
       }).sort({ createdAt: 1 });
 
       for (const sale of unpaidSales) {
-        if (remaining <= 0) break;
-        const applied = Math.min(remaining, sale.amountDue);
-        sale.payments.push({ method, amount: applied, reference });
-        const normalized = normalizeSalePaymentFields(sale.total, sale.payments);
-        sale.amountPaid = normalized.amountPaid;
-        sale.amountDue = normalized.amountDue;
-        await sale.save();
-        remaining -= applied;
+        if (remaining <= 0.009) break;
+        const applied = applyCashToSale(sale, method || 'cash', remaining, reference);
+        if (applied > 0) {
+          await sale.save();
+          remaining = Math.round((remaining - applied) * 100) / 100;
+        }
       }
     }
 
-    await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customer._id);
+    // Leftover after invoices is kept as CustomerPayment and netted against opening
+    // debt / dues in reconcile (do not mutate openingDebt — that creates fake credit).
+
+    const balances = await reconcileCustomerOutstanding(Customer, Sale, CustomerPayment, customer._id);
     await invalidateShopCache(['dashboard', 'reports']);
 
-    await createAuditLog(req.user._id, 'payment', 'customer', customer._id, null, { amount, method }, req);
-    res.status(201).json({ success: true, data: payment });
+    await createAuditLog(req.user._id, 'payment', 'customer', customer._id, null, { amount: payAmount, method }, req);
+    const updated = await Customer.findById(customer._id).lean();
+    res.status(201).json({
+      success: true,
+      data: payment,
+      customer: mapDebtor(updated),
+      balances,
+      previousDebt: netDebt,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 exports.refundCredit = async (req, res) => {
   try {
     const { amount, method, reference, notes } = req.body;

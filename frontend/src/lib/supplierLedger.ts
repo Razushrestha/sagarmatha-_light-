@@ -1,4 +1,4 @@
-export type LedgerKind = "purchase" | "payment";
+export type LedgerKind = "purchase" | "payment" | "return";
 
 export function voucherSeq(voucherNo: string): number {
   const match = String(voucherNo || "").match(/(\d+)\s*$/);

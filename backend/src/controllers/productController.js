@@ -285,16 +285,22 @@ exports.importProducts = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Choose a CSV or Excel file to import.' });
     }
 
+    const supplierId = req.body?.supplierId || req.query?.supplierId || undefined;
     const rawRows = await parseSpreadsheetBuffer(req.file.buffer, req.file.originalname);
-    const result = await importRows(rawRows);
-    await invalidateShopCache(['products', 'dashboard', 'reports']);
+    const result = await importRows(rawRows, { supplierId });
+    await invalidateShopCache(['products', 'dashboard', 'reports', 'categories']);
     await createAuditLog(
       req.user._id,
       'update',
       'product',
       req.user._id,
       null,
-      { created: result.created, updated: result.updated, errors: result.errors.length },
+      {
+        created: result.created,
+        updated: result.updated,
+        errors: result.errors.length,
+        supplierId: supplierId || null,
+      },
       req
     );
     res.json({ success: true, data: result });

@@ -17,15 +17,16 @@ async function issueFolioSale(req, stay, folio, {
   setRoomSale = false,
 } = {}) {
   if (!folio) return null;
-  const settings = await Settings.findOne().select('vatRate vatInclusive invoicePrefix vatNumber').lean();
-  const vatRate = Number.isFinite(Number(settings?.vatRate)) ? Number(settings.vatRate) : 13;
-  const vatInclusive = settings?.vatInclusive !== false;
+  const settings = await Settings.findOne().select('vatRate vatInclusive invoicePrefix vatNumber vatEnabled').lean();
+  const vatOn = settings?.vatEnabled !== false;
+  const vatRate = vatOn && Number.isFinite(Number(settings?.vatRate)) ? Number(settings.vatRate) : (vatOn ? 13 : 0);
+  const vatInclusive = vatOn && settings?.vatInclusive !== false;
   const bill = roomBillTotals({
     rate,
     nights,
     vatRate,
     vatInclusive,
-    includeVat: true,
+    includeVat: vatOn,
   });
   if (!(bill.total > 0)) return null;
 
@@ -35,7 +36,7 @@ async function issueFolioSale(req, stay, folio, {
 
   const sale = await Sale.create({
     invoiceNumber,
-    type: 'invoice',
+    type: vatOn ? 'invoice' : 'estimate',
     status: 'completed',
     customer: stay.customer || undefined,
     customerName: stay.guestName,
@@ -58,7 +59,7 @@ async function issueFolioSale(req, stay, folio, {
     amountPaid: 0,
     amountDue: bill.total,
     payments: [{ method: 'credit', amount: bill.total }],
-    isVatBill: true,
+    isVatBill: vatOn,
     notes: stay.guestIdNumber ? `ID ${stay.guestIdType || ''} ${stay.guestIdNumber}`.trim() : undefined,
     folioId: folio._id,
     shift: shift?._id,
@@ -155,10 +156,11 @@ async function creditStayNights(req, stay, folio, extras = {}) {
   const nights = Math.max(0, Number(extras.nights) || 0);
   const rate = extras.rate != null ? extras.rate : stay.rate;
   if (!(nights > 0) || !(Number(rate) > 0)) return null;
-  const settings = await Settings.findOne().select('vatRate vatInclusive').lean();
-  const vatRate = Number.isFinite(Number(settings?.vatRate)) ? Number(settings.vatRate) : 13;
-  const vatInclusive = settings?.vatInclusive !== false;
-  const bill = roomBillTotals({ rate, nights, vatRate, vatInclusive, includeVat: true });
+  const settings = await Settings.findOne().select('vatRate vatInclusive vatEnabled').lean();
+  const vatOn = settings?.vatEnabled !== false;
+  const vatRate = vatOn && Number.isFinite(Number(settings?.vatRate)) ? Number(settings.vatRate) : (vatOn ? 13 : 0);
+  const vatInclusive = vatOn && settings?.vatInclusive !== false;
+  const bill = roomBillTotals({ rate, nights, vatRate, vatInclusive, includeVat: vatOn });
   if (!(bill.total > 0)) return null;
   const description = extras.description || `Unused ${nights} night${nights === 1 ? '' : 's'} credit`;
   await postJournal({
